@@ -1,0 +1,20 @@
+[Unit]
+Description=Hierarchical Workspace Shell daemon
+Documentation=https://github.com/Homiakus/HWS
+After=graphical-session-pre.target
+PartOf=graphical-session.target
+
+[Service]
+Type=dbus
+BusName=org.homiakus.HWS1
+ExecStart=%h/.local/bin/hwsd
+Restart=on-failure
+RestartSec=1
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=-%h/.config/hws
+
+[Install]
+WantedBy=default.target

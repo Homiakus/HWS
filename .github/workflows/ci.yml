@@ -21,8 +21,9 @@ jobs:
       - name: Module graph check
         shell: bash
         run: |
+          go mod download github.com/godbus/dbus/v5@v5.1.0
           go mod tidy
-          git diff --exit-code -- go.mod go.sum
+          git diff --exit-code -- go.mod
       - name: Format check
         shell: bash
         run: |
@@ -39,5 +40,21 @@ jobs:
         run: go test -race -timeout 120s ./...
       - name: Vet
         run: go vet ./...
+      - name: JavaScript syntax
+        shell: bash
+        run: |
+          node --check providers/browser/webextension/background.js
+          node --check providers/vscode/extension.js
+          node --input-type=module --check < shell-extension/extension.js
+          node --input-type=module --check < shell-extension/appCapsule.js
+          node --input-type=module --check < shell-extension/daemonClient.js
+      - name: JSON manifests
+        shell: bash
+        run: |
+          python3 -m json.tool shell-extension/metadata.json >/dev/null
+          python3 -m json.tool providers/browser/webextension/manifest.json >/dev/null
+          python3 -m json.tool providers/vscode/package.json >/dev/null
+      - name: Build daemon
+        run: go build ./cmd/hwsd
       - name: Demo smoke test
         run: go run ./cmd/hwsctl

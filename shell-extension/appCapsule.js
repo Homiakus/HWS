@@ -2,6 +2,13 @@ import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 
+function compactTitle(title) {
+    const value = String(title || '').trim();
+    if (value.length <= 11)
+        return value;
+    return `${value.slice(0, 10)}…`;
+}
+
 export const AppCapsule = GObject.registerClass(
 class AppCapsule extends St.Button {
     _init(card, handlers = {}) {
@@ -50,7 +57,7 @@ class AppCapsule extends St.Button {
             return Clutter.EVENT_PROPAGATE;
         });
         this.connect('scroll-event', (_actor, event) => {
-            this._handlers.cycle?.(this._card, event.get_scroll_direction());
+            this._handlers.cycle?.(this._card, event.get_scroll_direction(), event.get_state());
             return Clutter.EVENT_STOP;
         });
         this.update(card);
@@ -76,12 +83,27 @@ class AppCapsule extends St.Button {
 
         this._segments.destroy_all_children();
         for (const segment of (card.segments || []).slice(0, 4)) {
-            const dot = new St.Widget({style_class: 'hws-surface-segment'});
-            dot.toggle_style_class_name('active', Boolean(segment.active));
-            dot.toggle_style_class_name('dirty', Boolean(segment.dirty));
-            dot.toggle_style_class_name('urgent', segment.attention === 'urgent');
-            dot.accessible_name = segment.title || 'surface';
-            this._segments.add_child(dot);
+            const rich = !segment.nativeWindow;
+            const item = new St.Label({
+                style_class: rich ? 'hws-surface-chip' : 'hws-surface-segment',
+                text: rich ? compactTitle(segment.title) : '',
+                reactive: rich,
+                track_hover: rich,
+                can_focus: rich,
+            });
+            item.toggle_style_class_name('active', Boolean(segment.active));
+            item.toggle_style_class_name('dirty', Boolean(segment.dirty));
+            item.toggle_style_class_name('urgent', segment.attention === 'urgent');
+            item.accessible_name = segment.title || 'surface';
+            if (rich) {
+                item.connect('button-press-event', (_actor, event) => {
+                    if (event.get_button() !== 1)
+                        return Clutter.EVENT_PROPAGATE;
+                    this._handlers.activateSegment?.(this._card, segment);
+                    return Clutter.EVENT_STOP;
+                });
+            }
+            this._segments.add_child(item);
         }
         if ((card.overflowCount || 0) > 0)
             this._segments.add_child(new St.Label({style_class: 'hws-segment-overflow', text: `+${card.overflowCount}`}));

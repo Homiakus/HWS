@@ -10,6 +10,7 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {AppCapsule} from './appCapsule.js';
+import {DaemonClient} from './daemonClient.js';
 
 const MAX_INLINE_WINDOWS = 4;
 
@@ -18,6 +19,24 @@ function needsAttention(window) {
         return Boolean(window.demands_attention || window.urgent);
     } catch (_error) {
         return false;
+    }
+}
+
+function attentionRank(value) {
+    if (value === 'urgent') return 3;
+    if (value === 'attention') return 2;
+    return 1;
+}
+
+function strongestAttention(a, b) {
+    return attentionRank(a) >= attentionRank(b) ? a : b;
+}
+
+function connectOptional(target, signal, callback, bucket) {
+    try {
+        bucket.push([target, target.connect(signal, callback)]);
+    } catch (_error) {
+        // GNOME minor versions may not expose every optional signal.
     }
 }
 
@@ -32,11 +51,24 @@ class ActivityStripIndicator extends PanelMenu.Button {
         this._cards = new Map();
         this._signals = [];
         this._refreshSource = 0;
+        this._richCards = [];
 
-        this._signals.push([global.display, global.display.connect('notify::focus-window', () => this.queueRefresh())]);
-        this._signals.push([global.display, global.display.connect('window-created', () => this.queueRefresh())]);
-        this._signals.push([global.workspace_manager, global.workspace_manager.connect('active-workspace-changed', () => this.queueRefresh())]);
-        this._signals.push([this._appSystem, this._appSystem.connect('app-state-changed', () => this.queueRefresh())]);
+        connectOptional(global.display, 'notify::focus-window', () => this.queueRefresh(), this._signals);
+        connectOptional(global.display, 'window-created', () => this.queueRefresh(), this._signals);
+        connectOptional(global.display, 'window-demands-attention', () => this.queueRefresh(), this._signals);
+        connectOptional(global.workspace_manager, 'active-workspace-changed', () => this.queueRefresh(), this._signals);
+        connectOptional(this._appSystem, 'app-state-changed', () => this.queueRefresh(), this._signals);
+
+        this._daemon = new DaemonClient({
+            onCardsChanged: cards => {
+                this._richCards = cards;
+                this.queueRefresh();
+            },
+            onAvailabilityChanged: available => {
+                this.toggle_style_class_name('daemon-unavailable', !available);
+                this.queueRefresh();
+            },
+        });
         this.queueRefresh();
     }
 
@@ -50,7 +82,7 @@ class ActivityStripIndicator extends PanelMenu.Button {
         });
     }
 
-    _refresh() {
+    _nativeCards() {
         const focused = global.display.focus_window;
         const cards = [];
         for (const app of this._appSystem.get_running()) {
@@ -72,16 +104,54 @@ class ActivityStripIndicator extends PanelMenu.Button {
                 app,
                 iconActor: app.create_icon_texture?.(16) || null,
                 segments: windows.slice(0, MAX_INLINE_WINDOWS).map(window => ({
-                    id: String(window.get_stable_sequence()),
+                    id: `window:${window.get_stable_sequence()}`,
                     title: window.get_title?.() || '',
                     active: window === active,
                     dirty: false,
                     attention: needsAttention(window) ? 'attention' : 'normal',
+                    nativeWindow: true,
                 })),
                 overflowCount: Math.max(0, windows.length - MAX_INLINE_WINDOWS),
             });
         }
-        cards.sort((a, b) => Number(b.focused) - Number(a.focused) || a.name.localeCompare(b.name));
+        return cards;
+    }
+
+    _mergeCards(nativeCards, richCards) {
+        const byID = new Map(nativeCards.map(card => [card.id, card]));
+        for (const rich of richCards || []) {
+            const native = byID.get(rich.id);
+            if (!native) {
+                byID.set(rich.id, {
+                    ...rich,
+                    windows: [],
+                    app: null,
+                    providerOnly: true,
+                    focused: Boolean(rich.focused),
+                    iconActor: null,
+                });
+                continue;
+            }
+            native.title = rich.title || native.title;
+            native.subtitle = rich.subtitle || native.subtitle;
+            native.progress = typeof rich.progress === 'number' ? rich.progress : native.progress;
+            native.surfaceCount = rich.surfaceCount || native.surfaceCount;
+            if (Array.isArray(rich.segments) && rich.segments.length > 0) {
+                native.segments = rich.segments;
+                native.overflowCount = rich.overflowCount || 0;
+            }
+            native.attention = strongestAttention(native.attention, rich.attention || 'normal');
+            native.rich = true;
+        }
+        return [...byID.values()];
+    }
+
+    _refresh() {
+        const cards = this._mergeCards(this._nativeCards(), this._richCards);
+        cards.sort((a, b) =>
+            Number(b.focused) - Number(a.focused) ||
+            attentionRank(b.attention) - attentionRank(a.attention) ||
+            (a.name || a.id).localeCompare(b.name || b.id));
         this._render(cards);
     }
 
@@ -98,8 +168,9 @@ class ActivityStripIndicator extends PanelMenu.Button {
             if (!capsule) {
                 capsule = new AppCapsule(card, {
                     activate: current => this._activate(current),
-                    cycle: (current, direction) => this._cycle(current, direction),
-                    newWindow: current => current.app.can_open_new_window?.() && current.app.open_new_window(-1),
+                    cycle: (current, direction, state) => this._cycle(current, direction, state),
+                    activateSegment: (current, segment) => this._activateSegment(current, segment),
+                    newWindow: current => current.app?.can_open_new_window?.() && current.app.open_new_window(-1),
                     openSwitcher: current => this._openSwitcher(current),
                 });
                 this._cards.set(card.id, capsule);
@@ -112,16 +183,42 @@ class ActivityStripIndicator extends PanelMenu.Button {
     }
 
     _activate(card) {
-        if (!card.windows?.length)
-            return;
-        if (card.focused && card.windows.length > 1) {
-            this._cycle(card, Clutter.ScrollDirection.DOWN);
+        if (card.windows?.length) {
+            if (card.focused && card.windows.length > 1) {
+                this._cycle(card, Clutter.ScrollDirection.DOWN, 0);
+                return;
+            }
+            card.app.activate_window(card.windows[0], global.get_current_time());
             return;
         }
-        card.app.activate_window(card.windows[0], global.get_current_time());
+        const target = (card.segments || []).find(segment => segment.active) || card.segments?.[0];
+        if (target)
+            this._daemon.activateView(card.id, target.id);
     }
 
-    _cycle(card, direction) {
+    _activateSegment(card, segment) {
+        if (segment.nativeWindow) {
+            const window = (card.windows || []).find(candidate => `window:${candidate.get_stable_sequence()}` === segment.id);
+            if (window)
+                card.app?.activate_window(window, global.get_current_time());
+            return;
+        }
+        this._daemon.activateView(card.id, segment.id);
+    }
+
+    _cycle(card, direction, state) {
+        const shift = Boolean(state & Clutter.ModifierType.SHIFT_MASK);
+        if (shift && (card.segments || []).some(segment => !segment.nativeWindow)) {
+            const segments = card.segments.filter(segment => !segment.nativeWindow);
+            if (segments.length === 0)
+                return;
+            let index = Math.max(0, segments.findIndex(segment => segment.active));
+            const backwards = direction === Clutter.ScrollDirection.UP || direction === Clutter.ScrollDirection.LEFT;
+            index = (index + (backwards ? -1 : 1) + segments.length) % segments.length;
+            this._daemon.activateView(card.id, segments[index].id);
+            return;
+        }
+
         const windows = card.windows || [];
         if (windows.length < 1)
             return;
@@ -133,19 +230,62 @@ class ActivityStripIndicator extends PanelMenu.Button {
     }
 
     _openSwitcher(card) {
+        if (card.surfaceCount > 0 && this._daemon.available) {
+            this._daemon.getApplicationSurface(card.id, surface => {
+                if (surface)
+                    this._renderSurfaceMenu(card, surface);
+                else
+                    this._renderWindowMenu(card);
+            });
+            return;
+        }
+        this._renderWindowMenu(card);
+    }
+
+    _renderSurfaceMenu(card, surface) {
         this.menu.removeAll();
-        for (const window of card.windows || []) {
+        for (const window of surface.windows || []) {
+            const views = window.views || [];
+            if (views.length === 0)
+                continue;
+            if ((surface.windows || []).length > 1) {
+                const heading = new PopupMenu.PopupMenuItem(window.title || 'Window', {reactive: false});
+                heading.add_style_class_name('hws-menu-heading');
+                this.menu.addMenuItem(heading);
+            }
+            for (const view of views) {
+                const marks = `${view.active ? '● ' : ''}${view.dirty ? '• ' : ''}`;
+                const item = new PopupMenu.PopupMenuItem(`${marks}${view.title || view.id}`);
+                item.connect('activate', () => this._daemon.activateView(card.id, view.id));
+                this.menu.addMenuItem(item);
+            }
+        }
+        this._appendWindowItems(card);
+        this.menu.open();
+    }
+
+    _renderWindowMenu(card) {
+        this.menu.removeAll();
+        this._appendWindowItems(card, false);
+        this.menu.open();
+    }
+
+    _appendWindowItems(card, withSeparator = true) {
+        const windows = card.windows || [];
+        if (withSeparator && windows.length > 0)
+            this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        for (const window of windows) {
             const item = new PopupMenu.PopupMenuItem(window.get_title?.() || card.name);
             item.connect('activate', () => card.app.activate_window(window, global.get_current_time()));
             this.menu.addMenuItem(item);
         }
         if (card.app?.can_open_new_window?.()) {
-            this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            if (windows.length > 0)
+                this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
             const item = new PopupMenu.PopupMenuItem('New window');
             item.connect('activate', () => card.app.open_new_window(-1));
             this.menu.addMenuItem(item);
         }
-        this.menu.open();
     }
 
     destroy() {
@@ -153,8 +293,15 @@ class ActivityStripIndicator extends PanelMenu.Button {
             GLib.source_remove(this._refreshSource);
             this._refreshSource = 0;
         }
-        for (const [object, id] of this._signals)
-            object.disconnect(id);
+        this._daemon?.destroy();
+        this._daemon = null;
+        for (const [object, id] of this._signals) {
+            try {
+                object.disconnect(id);
+            } catch (_error) {
+                // Object may have disappeared during session teardown.
+            }
+        }
         this._signals = [];
         this._cards.clear();
         super.destroy();
