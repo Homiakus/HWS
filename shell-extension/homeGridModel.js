@@ -1,5 +1,6 @@
 const MAX_NODES = 4096;
 const MAX_DEPTH = 4096;
+const MAX_SEARCH_RESULTS = 50;
 
 function requireString(value, name) {
     if (typeof value !== 'string' || value.length === 0)
@@ -159,4 +160,62 @@ export function pathToNode(model, nodeId) {
     }
     reverse.reverse();
     return reverse[0] === model.rootId ? reverse : [];
+}
+
+function subsequenceScore(value, query) {
+    let position = 0;
+    let gaps = 0;
+    for (const char of query) {
+        const next = value.indexOf(char, position);
+        if (next < 0)
+            return 0;
+        gaps += next - position;
+        position = next + 1;
+    }
+    return Math.max(1, 180 - gaps);
+}
+
+function scoreNode(node, query) {
+    const title = node.title.toLocaleLowerCase();
+    const id = node.id.toLocaleLowerCase();
+    const workspace = node.workspaceId.toLocaleLowerCase();
+    if (title === query)
+        return 1000;
+    if (title.startsWith(query))
+        return 850;
+    if (title.split(/\s+/).some(word => word.startsWith(query)))
+        return 760;
+    if (title.includes(query))
+        return 620;
+    if (id === query || workspace === query)
+        return 560;
+    if (id.includes(query))
+        return 430;
+    if (workspace.includes(query))
+        return 400;
+    return subsequenceScore(title, query);
+}
+
+export function searchTree(model, rawQuery, limit = 12) {
+    if (!model)
+        return [];
+    const query = String(rawQuery || '').trim().toLocaleLowerCase();
+    if (!query)
+        return [];
+    const boundedLimit = Math.max(1, Math.min(MAX_SEARCH_RESULTS, Number(limit) || 12));
+    const ranked = [];
+    for (const node of model.byId.values()) {
+        if (node.id === model.rootId)
+            continue;
+        const score = scoreNode(node, query);
+        if (score > 0)
+            ranked.push({node, score});
+    }
+    ranked.sort((a, b) =>
+        b.score - a.score ||
+        compareNodes(a.node, b.node));
+    return ranked.slice(0, boundedLimit).map(result => ({
+        ...result,
+        path: pathToNode(model, result.node.id),
+    }));
 }
