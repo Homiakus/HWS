@@ -1,0 +1,7 @@
+{
+  "name": "org.homiakus.hws.browser",
+  "description": "HWS browser native messaging bridge",
+  "path": "/usr/local/bin/hws-browser-bridge",
+  "type": "stdio",
+  "allowed_extensions": ["hws-provider@homiakus"]
+}

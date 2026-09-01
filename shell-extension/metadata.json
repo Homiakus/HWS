@@ -1,0 +1,8 @@
+{
+  "uuid": "hws@homiakus",
+  "name": "HWS Activity Strip",
+  "description": "Hierarchical Workspace Shell application surfaces and adaptive activity strip",
+  "shell-version": ["50"],
+  "version": 1,
+  "url": "https://github.com/Homiakus/HWS"
+}

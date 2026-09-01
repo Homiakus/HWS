@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "HWS Browser Surface Provider",
+  "version": "0.1.0",
+  "description": "Publishes non-private browser tabs to the local HWS provider bridge.",
+  "permissions": ["tabs", "nativeMessaging", "storage"],
+  "background": {"service_worker": "background.js"},
+  "browser_specific_settings": {"gecko": {"id": "hws-provider@homiakus"}}
+}

@@ -1,0 +1,19 @@
+{
+  "name": "hws-surface-provider",
+  "displayName": "HWS Surface Provider",
+  "description": "Publishes VS Code tabs and workspace state to HWS",
+  "version": "0.1.0",
+  "publisher": "homiakus",
+  "engines": {"vscode": "^1.95.0"},
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "HWS",
+      "properties": {
+        "hws.desktopAppId": {"type": "string", "default": "code.desktop", "description": "GNOME desktop application id used for surface correlation"}
+      }
+    }
+  }
+}
