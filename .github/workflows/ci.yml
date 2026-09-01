@@ -30,6 +30,7 @@ jobs:
           if [[ -n "$files" ]]; then
             echo "Unformatted Go files:"
             echo "$files"
+            gofmt -d .
             exit 1
           fi
       - name: Unit tests
