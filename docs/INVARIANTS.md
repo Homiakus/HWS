@@ -206,3 +206,85 @@ Activation, reconciliation, network/SSH, process startup и другие дол�
 ## I-30. Изменение инварианта требует ADR
 
 Нельзя «временно» нарушить этот документ внутри отдельного feature без фиксации архитектурного решения, последствий и плана возврата/миграции.
+
+## I-31. GNOME Shell process остаётся тонким
+
+Extension не выполняет тяжёлую business/infrastructure работу.
+
+В Shell hot path запрещены:
+
+- синхронное filesystem I/O;
+- network I/O;
+- database/storage work;
+- Git/project scanning;
+- Axiom runtime;
+- SSH/VPN orchestration;
+- неограниченные вычисления или обходы коллекций на каждый frame/input event.
+
+Тяжёлая работа выносится в `hwsd` и вызывается асинхронно через IPC.
+
+## I-32. Целевой GNOME adapter Ubuntu 26.04 является Wayland-first
+
+Core GNOME behaviour HWS не строится вокруг X11-only механизмов (`wmctrl`, `xdotool`, EWMH IDs, Alt+F2 restart).
+
+XWayland учитывается как тип client compatibility, а не как архитектурный backend HWS.
+
+## I-33. PID и title не являются durable идентичностью desktop window
+
+Primary app/window association строится через Shell/desktop application semantics и session-local window metadata.
+
+PID и title могут быть только дополнительными selector hints.
+
+## I-34. Запуск, появление окна, размещение и фокус — разные состояния
+
+Нельзя считать успешный `exec` или app activation доказательством того, что нужное окно создано, размещено и сфокусировано.
+
+Каждый этап подтверждается observation или возвращает отдельную ошибку/timeout.
+
+## I-35. Layout domain использует logical/normalized coordinates
+
+Monitor scale factor не умножается вручную в domain/layout planner.
+
+Преобразование в конкретные compositor coordinates принадлежит desktop adapter.
+
+## I-36. Monitor topology имеет revision
+
+Hotplug, изменение primary, scale, rotation или arrangement инвалидируют stale placement assumptions.
+
+После topology change активные workspaces проходят re-resolution/reconcile вместо blind replay старых absolute rectangles.
+
+## I-37. Shell enable/disable полностью обратимы
+
+Каждый actor, signal, main-loop source, cancellable, keybinding, injection, input controller/grab и D-Bus subscription имеет владельца и cleanup.
+
+Повторные enable/disable не должны накапливать callbacks или модификации Shell.
+
+## I-38. Смена D-Bus owner инвалидирует daemon snapshot
+
+Существующий proxy не является доказательством непрерывности `hwsd` instance.
+
+После исчезновения/смены bus owner extension выполняет новый protocol handshake и получает fresh capabilities/revisions до mutation operations.
+
+## I-39. HWS не отключает чужие extensions молча
+
+Compatibility scanner может обнаруживать конфликт, блокировать опасную функцию или предложить действие пользователю.
+
+Автоматическое выключение/изменение стороннего extension без явного consent запрещено.
+
+## I-40. Поддержка GNOME major версии должна быть доказана тестами
+
+Нельзя добавлять будущие GNOME версии в metadata или compatibility claims «на всякий случай».
+
+Новая major версия проходит porting review, nested tests, Ubuntu compatibility matrix и canary.
+
+## I-41. Lock-screen integration запрещена по умолчанию
+
+Extension работает только в обычном user session mode, пока отдельный ADR и security review не докажут необходимость `unlock-dialog`.
+
+Lock/unlock считается штатным lifecycle event; после возврата выполняется fresh observation.
+
+## I-42. Input grab/controller имеет минимальный scope
+
+Grab, gesture tracker или input controller не может переживать owner operation или exceptional path.
+
+Любой abort/error/disable обязан гарантированно освобождать input ownership; stale grab считается критическим defect.
