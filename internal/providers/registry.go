@@ -92,12 +92,12 @@ func (r *Registry) DropProvider(providerID string) {
 }
 
 func (r *Registry) Apply(base []surface.ApplicationSurface, now time.Time) []surface.ApplicationSurface {
-	byApp := make(map[surface.ApplicationID]*surface.ApplicationSurface, len(base))
+	byApp := make(map[surface.ApplicationID]int, len(base))
 	out := make([]surface.ApplicationSurface, 0, len(base))
 	for _, item := range base {
 		clone := item.Clone()
 		out = append(out, clone)
-		byApp[clone.AppID] = &out[len(out)-1]
+		byApp[clone.AppID] = len(out) - 1
 	}
 
 	r.mu.RLock()
@@ -126,8 +126,8 @@ func (r *Registry) Apply(base []surface.ApplicationSurface, now time.Time) []sur
 		if now.Sub(s.ObservedAt) > s.TTL || s.ObservedAt.After(now.Add(time.Second)) {
 			continue
 		}
-		app := byApp[s.AppID]
-		if app == nil {
+		idx, ok := byApp[s.AppID]
+		if !ok {
 			if !s.AllowOrphan {
 				continue
 			}
@@ -136,9 +136,10 @@ func (r *Registry) Apply(base []surface.ApplicationSurface, now time.Time) []sur
 				name = string(s.AppID)
 			}
 			out = append(out, surface.ApplicationSurface{AppID: s.AppID, Name: name})
-			app = &out[len(out)-1]
-			byApp[s.AppID] = app
+			idx = len(out) - 1
+			byApp[s.AppID] = idx
 		}
+		app := &out[idx]
 		if app.Capabilities == nil {
 			app.Capabilities = map[surface.Capability]bool{}
 		}
