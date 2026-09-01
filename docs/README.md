@@ -10,12 +10,28 @@
 - [`DOMAIN_MODEL.md`](DOMAIN_MODEL.md) — типы Node/Workspace/Resource/Action, identity, desired/observed и reconcile values.
 - [`WORKSPACE_LIFECYCLE.md`](WORKSPACE_LIFECYCLE.md) — формальная lifecycle-модель первой реализации на Axiom.
 - [`AXIOM_INTEGRATION.md`](AXIOM_INTEGRATION.md) — правила использования `Homiakus/axiom`, activities, retry/idempotency, durable storage и recovery.
+- [`IPC_CONTRACT.md`](IPC_CONTRACT.md) — versioned D-Bus boundary Shell ↔ `hwsd`: handshake, revisions, mutation acknowledgement, signals и reconnect semantics.
 - [`UX_HIERARCHY.md`](UX_HIERARCHY.md) — динамическая иерархия, Home/Focus modes, поиск и UX-инварианты.
 - [`GNOME_ADAPTER.md`](GNOME_ADAPTER.md) — контракт GNOME 50 adapter: capabilities, window identity, launch/activation, focus, geometry, topology и D-Bus reconnect.
 - [`DEVELOPER_PRACTICES_AND_FAILURE_MODES.md`](DEVELOPER_PRACTICES_AND_FAILURE_MODES.md) — исследование официальных практик GNOME и реальных проблем PaperWM/Tiling Shell/Ubuntu с архитектурными выводами для HWS.
 - [`INVARIANTS.md`](INVARIANTS.md) — правила, которые код HWS не имеет права нарушать без отдельного ADR.
 - [`TEST_STRATEGY.md`](TEST_STRATEGY.md) — unit/property/fuzz/mutation/Axiom-contract/fault/restart/E2E testing.
 - [`SECURITY_MODEL.md`](SECURITY_MODEL.md) — threat model, privilege boundaries, typed command execution и ownership.
+
+## Реализованный headless vertical slice
+
+Текущий код в `main` уже содержит:
+
+- Go 1.26 module с закреплённым commit Axiom;
+- `internal/domain` — стабильные ID, дерево произвольной глубины, desired/observed state и deterministic reconcile diff;
+- `internal/platform` — desktop adapter boundary;
+- `internal/adapters/fake` — deterministic fake desktop с failure injection и ownership semantics;
+- `internal/application/reconcile` — observe → plan → ensure → observe → evaluate;
+- `internal/orchestration/workspace` — Axiom `WorkspaceLifecycle` и typed activities;
+- `cmd/hwsctl` — headless smoke/demo activation;
+- GitHub CI для Go 1.26: format, unit, race, vet и demo smoke test.
+
+Fake adapter не является доказательством готовности GNOME integration. Его назначение — стабилизировать domain/orchestration semantics до подключения Shell/Mutter.
 
 ## Architecture Decision Records
 
@@ -28,14 +44,13 @@
 
 ## Документы следующей очереди
 
-1. `IPC_CONTRACT.md` — versioned локальный API UI ↔ `hwsd`, handshake/revisions/owner changes.
-2. `STORAGE.md` — durable state, snapshots, migrations, corruption/recovery.
-3. `OBSERVABILITY.md` — correlation IDs, logs, traces, diagnostics bundle.
-4. `PERFORMANCE.md` — budgets, benchmarks и profiling protocol, включая Shell main-loop budget.
-5. `PACKAGING.md` — install/update/disable/uninstall/fallback/safe mode.
-6. `CONFIG_SCHEMA.md` — пользовательская иерархия и workspace definitions.
-7. `PROVIDER_MODEL.md` — dynamic providers, permissions и lifecycle.
-8. `COMPATIBILITY_MATRIX.md` — Ubuntu defaults, GNOME major, scaling, multi-monitor и third-party extension conflicts.
+1. `STORAGE.md` — durable state, snapshots, migrations, corruption/recovery.
+2. `OBSERVABILITY.md` — correlation IDs, logs, traces, diagnostics bundle.
+3. `PERFORMANCE.md` — budgets, benchmarks и profiling protocol, включая Shell main-loop budget.
+4. `PACKAGING.md` — install/update/disable/uninstall/fallback/safe mode.
+5. `CONFIG_SCHEMA.md` — пользовательская иерархия и workspace definitions.
+6. `PROVIDER_MODEL.md` — dynamic providers, permissions и lifecycle.
+7. `COMPATIBILITY_MATRIX.md` — Ubuntu defaults, GNOME major, scaling, multi-monitor и third-party extension conflicts.
 
 ## Правило качества документации
 
