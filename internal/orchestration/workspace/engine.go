@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Homiakus/axiom"
 	"github.com/Homiakus/HWS/internal/application/reconcile"
 	"github.com/Homiakus/HWS/internal/domain"
+	"github.com/Homiakus/axiom"
 )
 
 type Resolver interface {
