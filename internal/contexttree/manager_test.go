@@ -23,6 +23,9 @@ func TestManagerConfiguresDefaultHierarchyAndResolvesPath(t *testing.T) {
 	if len(resolved) != 3 || resolved[0].ID != "root" || resolved[2].ID != "system-network" {
 		t.Fatalf("unexpected path: %#v", resolved)
 	}
+	if !manager.Valid() {
+		t.Fatal("fresh hierarchy should be valid")
+	}
 }
 
 func TestInvalidReloadKeepsLastKnownGoodTree(t *testing.T) {
@@ -45,5 +48,11 @@ func TestInvalidReloadKeepsLastKnownGoodTree(t *testing.T) {
 	}
 	if manager.LastError() == nil {
 		t.Fatal("reload diagnostic was not retained")
+	}
+	if manager.Valid() {
+		t.Fatal("current hierarchy config must be invalid while last-known-good remains usable")
+	}
+	if _, err := manager.Path("system-network"); err != nil {
+		t.Fatalf("last-known-good hierarchy must remain navigable: %v", err)
 	}
 }
