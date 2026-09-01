@@ -59,6 +59,30 @@ function monitorRef(window) {
     }
 }
 
+function optionalIdentity(window, method) {
+    try {
+        const value = window?.[method]?.();
+        return typeof value === 'string' ? value.trim() : '';
+    } catch (_error) {
+        return '';
+    }
+}
+
+function identityHints(app, windows) {
+    const values = new Set();
+    const appID = app.get_id?.();
+    if (appID)
+        values.add(appID);
+    for (const window of windows) {
+        for (const method of ['get_sandboxed_app_id', 'get_gtk_application_id', 'get_wm_class', 'get_wm_class_instance']) {
+            const value = optionalIdentity(window, method);
+            if (value)
+                values.add(value);
+        }
+    }
+    return [...values];
+}
+
 const ActivityStripIndicator = GObject.registerClass(
 class ActivityStripIndicator extends PanelMenu.Button {
     _init() {
@@ -141,6 +165,7 @@ class ActivityStripIndicator extends PanelMenu.Button {
                 surfaceCount: 0,
                 windows,
                 app,
+                identityHints: identityHints(app, windows),
                 segments: windows.slice(0, MAX_INLINE_WINDOWS).map(window => ({
                     id: windowID(window),
                     kind: 'window',
@@ -163,6 +188,7 @@ class ActivityStripIndicator extends PanelMenu.Button {
                 appId: card.id,
                 name: card.name,
                 desktopAppId: card.id,
+                identityHints: card.identityHints || [],
                 busy: Boolean(card.busy),
                 windows: card.windows.map(window => ({
                     id: windowID(window),
@@ -201,11 +227,20 @@ class ActivityStripIndicator extends PanelMenu.Button {
 
     _enrichCards(daemonCards, nativeCards) {
         const nativeByID = new Map(nativeCards.map(card => [card.id, card]));
+        const nativeByWindow = new Map();
+        for (const card of nativeCards) {
+            for (const window of card.windows || [])
+                nativeByWindow.set(windowID(window), card);
+        }
         const out = [];
-        const seen = new Set();
+        const seenNative = new Set();
 
         for (const daemonCard of daemonCards || []) {
-            const native = nativeByID.get(daemonCard.id);
+            let native = nativeByID.get(daemonCard.id);
+            if (!native) {
+                const nativeWindowSegment = (daemonCard.segments || []).find(segment => segment.kind === 'window');
+                native = nativeByWindow.get(nativeWindowSegment?.id);
+            }
             const segments = (daemonCard.segments || []).map(segment => ({
                 ...segment,
                 nativeWindow: segment.kind === 'window',
@@ -217,13 +252,14 @@ class ActivityStripIndicator extends PanelMenu.Button {
                 providerOnly: !native,
                 segments,
             });
-            seen.add(daemonCard.id);
+            if (native)
+                seenNative.add(native.id);
         }
 
         // During daemon startup or a missed D-Bus push, never make an otherwise
         // healthy GNOME application disappear from the panel.
         for (const native of nativeCards) {
-            if (!seen.has(native.id))
+            if (!seenNative.has(native.id))
                 out.push(native);
         }
         return out;
@@ -249,7 +285,7 @@ class ActivityStripIndicator extends PanelMenu.Button {
         if (Number.isFinite(gap) && gap >= 0)
             this._box.set_style(`spacing: ${Math.min(64, gap)}px;`);
         else
-            this._box.set_style(null);
+            this._box.set_style('');
     }
 
     _render(cards) {

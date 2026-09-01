@@ -38,6 +38,7 @@ type Snapshot struct {
 	ProviderID      string                `json:"providerId"`
 	Kind            SourceKind            `json:"kind"`
 	AppID           surface.ApplicationID `json:"appId"`
+	IdentityHints   []string              `json:"identityHints,omitempty"`
 	ObservedAt      time.Time             `json:"observedAt"`
 	TTL             time.Duration         `json:"-"`
 	Priority        int                   `json:"priority"`
@@ -78,6 +79,21 @@ func normalizeSnapshot(s Snapshot) (Snapshot, error) {
 	if s.Confidence == 0 {
 		s.Confidence = surface.ConfidenceMedium
 	}
+	cleanHints := make([]string, 0, len(s.IdentityHints))
+	seen := map[string]struct{}{}
+	for _, hint := range s.IdentityHints {
+		hint = strings.TrimSpace(hint)
+		if hint == "" {
+			continue
+		}
+		key := strings.ToLower(hint)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		cleanHints = append(cleanHints, hint)
+	}
+	s.IdentityHints = cleanHints
 	return s, nil
 }
 
@@ -232,6 +248,9 @@ func (r *Registry) Apply(base []surface.ApplicationSurface, now time.Time) []sur
 	}
 	r.mu.RUnlock()
 	slices.SortFunc(snaps, func(a, b Snapshot) int {
+		if sourceRank(a.Kind) != sourceRank(b.Kind) {
+			return sourceRank(a.Kind) - sourceRank(b.Kind)
+		}
 		if a.Priority != b.Priority {
 			return a.Priority - b.Priority
 		}
@@ -247,9 +266,16 @@ func (r *Registry) Apply(base []surface.ApplicationSurface, now time.Time) []sur
 		return 0
 	})
 
-	for _, s := range snaps {
-		if !snapshotFresh(s, now) {
+	identities := buildNativeIdentityIndex(snaps, now)
+	for _, original := range snaps {
+		if !snapshotFresh(original, now) {
 			continue
+		}
+		s := original
+		if s.Kind != SourceNative {
+			if canonical, ok := resolveNativeIdentity(s, identities); ok {
+				s.AppID = canonical
+			}
 		}
 		idx, ok := byApp[s.AppID]
 		if !ok {
@@ -298,6 +324,85 @@ func (r *Registry) Apply(base []surface.ApplicationSurface, now time.Time) []sur
 	return out
 }
 
+func sourceRank(kind SourceKind) int {
+	if kind == SourceNative {
+		return 0
+	}
+	return 1
+}
+
+type identityIndex map[string]surface.ApplicationID
+
+func buildNativeIdentityIndex(snaps []Snapshot, now time.Time) identityIndex {
+	index := identityIndex{}
+	for _, s := range snaps {
+		if s.Kind != SourceNative || !snapshotFresh(s, now) {
+			continue
+		}
+		for _, key := range snapshotIdentityKeys(s) {
+			if existing, ok := index[key]; ok && existing != s.AppID {
+				// Empty means intentionally ambiguous. Consumers must fail closed.
+				index[key] = ""
+				continue
+			}
+			index[key] = s.AppID
+		}
+	}
+	return index
+}
+
+func resolveNativeIdentity(s Snapshot, index identityIndex) (surface.ApplicationID, bool) {
+	candidates := map[surface.ApplicationID]struct{}{}
+	for _, key := range snapshotIdentityKeys(s) {
+		if appID, ok := index[key]; ok && appID != "" {
+			candidates[appID] = struct{}{}
+		}
+	}
+	if len(candidates) != 1 {
+		return "", false
+	}
+	for appID := range candidates {
+		return appID, true
+	}
+	return "", false
+}
+
+func snapshotIdentityKeys(s Snapshot) []string {
+	values := make([]string, 0, 2+len(s.IdentityHints))
+	values = append(values, string(s.AppID), s.DesktopAppID)
+	values = append(values, s.IdentityHints...)
+	keys := map[string]struct{}{}
+	for _, value := range values {
+		for _, key := range identityKeys(value) {
+			keys[key] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(keys))
+	for key := range keys {
+		out = append(out, key)
+	}
+	slices.Sort(out)
+	return out
+}
+
+func identityKeys(value string) []string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.TrimPrefix(value, "application://")
+	value = strings.TrimSuffix(value, "/")
+	if slash := strings.LastIndex(value, "/"); slash >= 0 {
+		value = value[slash+1:]
+	}
+	if value == "" {
+		return nil
+	}
+	keys := []string{"exact:" + value}
+	stem := strings.TrimSuffix(value, ".desktop")
+	if stem != "" && !strings.ContainsAny(stem, " \t\r\n") {
+		keys = append(keys, "stem:"+stem)
+	}
+	return keys
+}
+
 func mergeWindows(app *surface.ApplicationSurface, snap Snapshot) {
 	for _, patch := range snap.Windows {
 		idx := -1
@@ -307,7 +412,6 @@ func mergeWindows(app *surface.ApplicationSurface, snap Snapshot) {
 					idx = i
 					break
 				}
-			}
 		}
 		if idx < 0 && patch.WindowID == "" && len(app.Windows) == 1 {
 			idx = 0

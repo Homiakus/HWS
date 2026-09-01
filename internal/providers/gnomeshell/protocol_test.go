@@ -13,6 +13,7 @@ func TestSnapshotProjectsAuthoritativeWindows(t *testing.T) {
 		Schema: SchemaVersion, Revision: 7, CapturedAt: at,
 		Apps: []Application{{
 			AppID: "org.gnome.Terminal.desktop", Name: "Terminal", Busy: true,
+			IdentityHints: []string{"org.gnome.Terminal", "Gnome-terminal"},
 			Windows: []Window{
 				{ID: "window:10", Title: "shell", WorkspaceID: "workspace:1", MonitorRef: "monitor:0", Focused: true, MRU: 44},
 				{ID: "window:11", Title: "logs", Attention: surface.AttentionUrgent},
@@ -34,6 +35,9 @@ func TestSnapshotProjectsAuthoritativeWindows(t *testing.T) {
 	}
 	if providers[0].Status.Attention == nil || *providers[0].Status.Attention != surface.AttentionUrgent {
 		t.Fatal("strongest attention was not projected")
+	}
+	if len(providers[0].IdentityHints) != 2 {
+		t.Fatalf("identity hints missing: %#v", providers[0].IdentityHints)
 	}
 }
 

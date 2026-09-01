@@ -24,12 +24,13 @@ type Snapshot struct {
 }
 
 type Application struct {
-	AppID        string   `json:"appId"`
-	Name         string   `json:"name"`
-	IconName     string   `json:"iconName,omitempty"`
-	DesktopAppID string   `json:"desktopAppId,omitempty"`
-	Busy         bool     `json:"busy,omitempty"`
-	Windows      []Window `json:"windows"`
+	AppID         string   `json:"appId"`
+	Name          string   `json:"name"`
+	IconName      string   `json:"iconName,omitempty"`
+	DesktopAppID  string   `json:"desktopAppId,omitempty"`
+	IdentityHints []string `json:"identityHints,omitempty"`
+	Busy          bool     `json:"busy,omitempty"`
+	Windows       []Window `json:"windows"`
 }
 
 type Window struct {
@@ -119,6 +120,7 @@ func (s Snapshot) ProviderSnapshots() []providers.Snapshot {
 			ProviderID:      ProviderID,
 			Kind:            providers.SourceNative,
 			AppID:           surface.ApplicationID(app.AppID),
+			IdentityHints:   append([]string(nil), app.IdentityHints...),
 			ObservedAt:      s.CapturedAt,
 			TTL:             5 * time.Second,
 			Priority:        200,

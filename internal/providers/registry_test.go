@@ -112,3 +112,56 @@ func TestProviderHealthDistinguishesFreshStaleAndPartial(t *testing.T) {
 		t.Fatalf("health aggregation incomplete: %#v", health[0])
 	}
 }
+
+func TestNativeIdentityHintsMergeRichProviderIntoCanonicalApp(t *testing.T) {
+	now := time.Unix(100, 0)
+	r := NewRegistry()
+	if err := r.Ingest(Snapshot{
+		ProviderID: "gnome-shell", Kind: SourceNative, AppID: "firefox_firefox.desktop",
+		IdentityHints: []string{"firefox"}, AllowOrphan: true, ApplicationName: "Firefox", ObservedAt: now, TTL: time.Minute, Revision: 7,
+		Windows: []WindowPatch{{WindowID: "window:1", Title: "Firefox", AuthoritativeState: true}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Ingest(Snapshot{
+		ProviderID: "browser:firefox", Kind: SourceExtension, AppID: "firefox.desktop",
+		IdentityHints: []string{"firefox"}, AllowOrphan: true, ObservedAt: now, TTL: time.Minute, Revision: 2,
+		Windows: []WindowPatch{{ProviderWindowID: "99", Views: []surface.View{{ID: "tab:1", Kind: surface.ViewTab, Title: "HWS"}}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out := r.Apply(nil, now)
+	if len(out) != 1 {
+		t.Fatalf("alias resolution produced %d applications: %#v", len(out), out)
+	}
+	app := out[0]
+	if app.AppID != "firefox_firefox.desktop" || len(app.Windows) != 1 || app.Windows[0].ProviderOnly {
+		t.Fatalf("rich provider did not merge into native window: %#v", app)
+	}
+	if len(app.Windows[0].Views) != 1 || app.Windows[0].Views[0].ID != "tab:1" {
+		t.Fatalf("rich view missing after canonical merge: %#v", app.Windows[0].Views)
+	}
+}
+
+func TestAmbiguousIdentityHintFailsClosed(t *testing.T) {
+	now := time.Unix(100, 0)
+	r := NewRegistry()
+	for _, appID := range []surface.ApplicationID{"one.desktop", "two.desktop"} {
+		if err := r.Ingest(Snapshot{
+			ProviderID: "gnome-shell", Kind: SourceNative, AppID: appID, IdentityHints: []string{"shared"},
+			AllowOrphan: true, ObservedAt: now, TTL: time.Minute, Revision: 1,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.Ingest(Snapshot{
+		ProviderID: "extension", Kind: SourceExtension, AppID: "shared.desktop", IdentityHints: []string{"shared"},
+		AllowOrphan: true, ObservedAt: now, TTL: time.Minute, Revision: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out := r.Apply(nil, now)
+	if len(out) != 3 {
+		t.Fatalf("ambiguous identity was incorrectly merged: %#v", out)
+	}
+}
