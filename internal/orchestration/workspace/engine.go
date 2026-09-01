@@ -68,10 +68,19 @@ func openWithOptions(
 			if err != nil {
 				return ReconcileWorkspaceOutput{}, err
 			}
+			reachedRequired := result.Evaluation.RequiredReached
+			totalRequired := result.Evaluation.RequiredTotal
+			if reachedRequired < 0 || totalRequired < 0 || reachedRequired > totalRequired {
+				return ReconcileWorkspaceOutput{}, fmt.Errorf(
+					"workspace lifecycle: invalid reconcile counts reached=%d total=%d",
+					reachedRequired,
+					totalRequired,
+				)
+			}
 			return ReconcileWorkspaceOutput{
 				Status:          result.TargetStatus(),
-				ReachedRequired: result.Evaluation.RequiredReached,
-				TotalRequired:   result.Evaluation.RequiredTotal,
+				ReachedRequired: reachedRequired,
+				TotalRequired:   totalRequired,
 				FailureCode:     result.FailureCode(),
 			}, nil
 		}),
