@@ -64,10 +64,10 @@ type Hub struct {
 	configMod  time.Time
 	configSize int64
 
-	surfaceSnapshot surface.Snapshot
-	panelSnapshot   panel.Snapshot
-	panelRevision   uint64
-	configRevision  uint64
+	surfaceSnapshot  surface.Snapshot
+	panelSnapshot    panel.Snapshot
+	panelRevision    uint64
+	configRevision   uint64
 	lastSpecRevision uint64
 
 	onPanelChanged       func(uint64)
