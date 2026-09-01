@@ -113,12 +113,12 @@ func (a MutationAck) Validate() error {
 type ErrorCode string
 
 const (
-	ErrProtocolIncompatible      ErrorCode = "protocol_incompatible"
-	ErrStaleRevision             ErrorCode = "stale_revision"
-	ErrWorkspaceNotFound         ErrorCode = "workspace_not_found"
-	ErrWorkspaceDefinition       ErrorCode = "workspace_definition_invalid"
-	ErrCapabilityUnavailable     ErrorCode = "capability_unavailable"
-	ErrOperationConflict         ErrorCode = "operation_conflict"
-	ErrDaemonRecovering          ErrorCode = "daemon_recovering"
-	ErrInternal                  ErrorCode = "internal_error"
+	ErrProtocolIncompatible  ErrorCode = "protocol_incompatible"
+	ErrStaleRevision         ErrorCode = "stale_revision"
+	ErrWorkspaceNotFound     ErrorCode = "workspace_not_found"
+	ErrWorkspaceDefinition   ErrorCode = "workspace_definition_invalid"
+	ErrCapabilityUnavailable ErrorCode = "capability_unavailable"
+	ErrOperationConflict     ErrorCode = "operation_conflict"
+	ErrDaemonRecovering      ErrorCode = "daemon_recovering"
+	ErrInternal              ErrorCode = "internal_error"
 )
