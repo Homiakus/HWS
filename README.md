@@ -27,13 +27,13 @@ HWS не начинает с форка оконного менеджера ил
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │                    HWS Shell UI                             │
-│   hierarchy grid · focus mode · search · context stack     │
+│ hierarchy grid · focus · Activity Strip · search · context │
 └──────────────────────────────┬──────────────────────────────┘
                                │ IPC / D-Bus
 ┌──────────────────────────────▼──────────────────────────────┐
 │                      hwsd (Go)                             │
-│ context · workspace · actions · discovery · persistence    │
-│ git · processes · systemd · network · window intentions    │
+│ context · workspace · surfaces · actions · persistence     │
+│ git · processes · systemd · network · providers            │
 └──────────────┬───────────────────────┬──────────────────────┘
                │                       │
         ┌──────▼──────┐         ┌──────▼────────────────┐
@@ -46,6 +46,24 @@ HWS не начинает с форка оконного менеджера ил
         │ + history   │
         └─────────────┘
 ```
+
+## Application Surfaces и Activity Strip
+
+HWS не использует классическую taskbar как основную модель активной работы. Вместо «иконка приложения + точка запуска» оболочка строит `ApplicationSurface` — проекцию приложения, его окон, доступных внутренних views/tabs и значимых состояний.
+
+Одна карточка Activity Strip по умолчанию соответствует одному приложению и адаптивно показывает текущий контекст, состояние, progress, количество окон и, если provider это умеет, последние/важные вкладки или документы.
+
+```text
+Zed                 Firefox              Terminal
+HWS · panel.go       GitHub / HWS         ssh · dev-vps
+Tests 42%            [HWS][CI][Docs]+9    build running
+```
+
+Несколько окон раскрываются как группа. Rich tabs/views не угадываются из заголовков окон: они приходят от browser/IDE/terminal providers, а отсутствие такого provider-а корректно деградирует к window-only модели.
+
+Пользовательская компоновка панели проектируется как декларативный HCL-based DSL, который компилируется в renderer-neutral `Panel Model`. DSL не выполняет arbitrary shell commands и не получает прямого доступа к GNOME objects.
+
+Подробности: [`docs/APPLICATION_SURFACES_AND_ACTIVITY_STRIP.md`](docs/APPLICATION_SURFACES_AND_ACTIVITY_STRIP.md).
 
 ## Роль Axiom
 
@@ -79,17 +97,22 @@ Axiom **не используется для каждого hover/click/animatio
 8. **Keyboard-first, но не keyboard-only.** Полноценная мышь/тач/клавиатура, быстрые последовательности и поиск.
 9. **Не ломать базовую Ubuntu на первом этапе.** HWS должен быть отключаемым/восстанавливаемым слоем.
 10. **Архитектурные решения фиксируются ADR.** Значимые компромиссы нельзя хранить только в коде или переписке.
+11. **Active work — это ресурсы и состояния, не иконки.** Activity Strip показывает текущую деятельность и доступные окна/views.
+12. **Progressive disclosure применяется и к панели.** Карточки деградируют `full → compact → micro`, а не перегружают экран.
 
 ## Основные подсистемы
 
 | Подсистема | Ответственность |
 |---|---|
-| `shell-ui` | Grid, Focus Mode, Context Stack, search, widgets, keyboard navigation |
+| `shell-ui` | Grid, Focus Mode, Activity Strip, Context Stack, search, widgets, keyboard navigation |
 | `hwsd` | Главный Go daemon и application layer |
 | `context` | Иерархия узлов, selection path, разрешение действий |
 | `workspace` | Desired/observed state рабочего окружения |
+| `surface` | ApplicationSurface aggregation, windows/views, provider capabilities |
+| `panel` | Renderer-neutral Panel Model и безопасная DSL-конфигурация |
 | `orchestrator` | Выполнение операций через Axiom |
 | `integrations` | GNOME, systemd, processes, Git, SSH, network, portals |
+| `providers` | Browser/IDE/terminal и другие rich-state adapters |
 | `storage` | Настройки, индекс, durable state, history |
 | `discovery` | Поиск проектов, приложений, репозиториев и системных возможностей |
 | `policy` | Инварианты, permissions, safety boundaries |
@@ -101,7 +124,9 @@ Axiom **не используется для каждого hover/click/animatio
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — целевая архитектура и границы компонентов.
 - [`docs/AXIOM_INTEGRATION.md`](docs/AXIOM_INTEGRATION.md) — модель использования Axiom.
 - [`docs/UX_HIERARCHY.md`](docs/UX_HIERARCHY.md) — иерархическая сетка, режимы и навигация.
+- [`docs/APPLICATION_SURFACES_AND_ACTIVITY_STRIP.md`](docs/APPLICATION_SURFACES_AND_ACTIVITY_STRIP.md) — ApplicationSurface, окна/views, Activity Strip и Panel DSL.
 - [`docs/INVARIANTS.md`](docs/INVARIANTS.md) — системные инварианты HWS.
+- [`docs/adr/0006-application-surface-and-panel-dsl.md`](docs/adr/0006-application-surface-and-panel-dsl.md) — решение о resource-oriented панели и HCL DSL.
 - [`docs/adr/`](docs/adr/) — архитектурные решения.
 
 ## Ближайший вертикальный срез
@@ -124,9 +149,11 @@ Super
 4. применить раскладку;
 5. зафиксировать observed state;
 6. показать пользователю состояние и возможные ошибки;
-7. позволить закрыть и восстановить контекст повторно.
+7. позволить закрыть и восстановить контекст повторно;
+8. построить window-only ApplicationSurface projection для запущенных приложений;
+9. показать их в Activity Strip с корректной группировкой нескольких окон.
 
-До появления этого вертикального среза расширение набора интеграций считается вторичным.
+До появления этого вертикального среза расширение набора rich providers считается вторичным.
 
 ## Репозитории
 
