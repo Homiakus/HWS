@@ -14,6 +14,7 @@ import (
 	"github.com/Homiakus/HWS/internal/daemon"
 	"github.com/Homiakus/HWS/internal/dbusapi"
 	"github.com/Homiakus/HWS/internal/providers"
+	"github.com/Homiakus/HWS/internal/providers/mpris"
 	providerserver "github.com/Homiakus/HWS/internal/providers/server"
 )
 
@@ -57,6 +58,16 @@ func run() error {
 	}
 	defer dbusServer.Close()
 	hub.SetNotifiers(dbusServer.EmitPanelChanged, dbusServer.EmitPanelConfigChanged)
+
+	mprisCollector, err := mpris.OpenSession(hub)
+	if err != nil {
+		log.Printf("MPRIS collector unavailable: %v", err)
+	} else {
+		defer mprisCollector.Close()
+		go mprisCollector.Run(ctx, 2*time.Second, func(err error) {
+			log.Printf("MPRIS collector: %v", err)
+		})
+	}
 
 	errs := make(chan error, 1)
 	go func() {

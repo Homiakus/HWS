@@ -40,6 +40,8 @@ jobs:
         run: go test -race -timeout 120s ./...
       - name: Vet
         run: go vet ./...
+      - name: D-Bus round trip
+        run: dbus-run-session -- go test -timeout 30s -run TestSessionRoundTrip ./internal/dbusapi
       - name: JavaScript syntax
         shell: bash
         run: |
