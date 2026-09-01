@@ -42,3 +42,46 @@
 .hws-menu-heading { font-weight: 700; opacity: 0.72; }
 .hws-progress-track { height: 2px; margin-top: 1px; background-color: rgba(255,255,255,0.12); }
 .hws-progress-fill { height: 2px; background-color: rgba(255,255,255,0.8); }
+
+.hws-home-trigger { padding: 0 6px; }
+.hws-home-trigger-content { spacing: 5px; }
+.hws-home-modal .modal-dialog-content-box { padding: 18px; }
+.hws-home-root {
+  min-width: 720px;
+  max-width: 1180px;
+  spacing: 12px;
+}
+.hws-home-header { spacing: 12px; }
+.hws-home-title { font-size: 1.25em; font-weight: 700; }
+.hws-home-revision { opacity: 0.55; font-size: 0.85em; }
+.hws-home-breadcrumbs { spacing: 5px; }
+.hws-home-crumb {
+  padding: 4px 8px;
+  border-radius: 7px;
+  background-color: rgba(255,255,255,0.06);
+}
+.hws-home-crumb:hover, .hws-home-crumb:focus { background-color: rgba(255,255,255,0.12); }
+.hws-home-crumb.current { background-color: rgba(255,255,255,0.16); font-weight: 700; }
+.hws-home-chevron { opacity: 0.45; padding: 4px 0; }
+.hws-home-rows { spacing: 8px; }
+.hws-home-row-scroll { min-height: 58px; }
+.hws-home-row { spacing: 7px; padding: 2px 1px 8px 1px; }
+.hws-home-tile {
+  min-width: 132px;
+  max-width: 220px;
+  min-height: 44px;
+  padding: 7px 11px;
+  border-radius: 10px;
+  background-color: rgba(255,255,255,0.055);
+  transition-duration: 100ms;
+}
+.hws-home-tile:hover, .hws-home-tile:focus { background-color: rgba(255,255,255,0.12); }
+.hws-home-tile.selected {
+  background-color: rgba(255,255,255,0.18);
+  box-shadow: inset 0 -2px rgba(255,255,255,0.88);
+}
+.hws-home-tile.kind-project { font-weight: 650; }
+.hws-home-tile.kind-task { background-color: rgba(255,255,255,0.08); }
+.hws-home-status { padding: 5px 2px; opacity: 0.72; }
+.hws-home-status.error { color: #ff8c8c; opacity: 1; }
+.hws-home-hint { font-size: 0.82em; opacity: 0.52; }
