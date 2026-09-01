@@ -11,60 +11,56 @@ import (
 )
 
 type SurfaceLifecycle string
-
 type SurfaceAttention string
-
 type SurfaceActivity string
-
 type SurfaceResourceState string
-
 type SurfaceCapability string
 
 const (
-	SurfaceLifecycleUnknown   SurfaceLifecycle = "unknown"
-	SurfaceLifecycleStopped   SurfaceLifecycle = "stopped"
-	SurfaceLifecycleStarting  SurfaceLifecycle = "starting"
-	SurfaceLifecycleRunning   SurfaceLifecycle = "running"
-	SurfaceLifecycleSuspended SurfaceLifecycle = "suspended"
-	SurfaceLifecycleCrashed   SurfaceLifecycle = "crashed"
+	SurfaceLifecycleUnknown		SurfaceLifecycle = "unknown"
+	SurfaceLifecycleStopped		SurfaceLifecycle = "stopped"
+	SurfaceLifecycleStarting	SurfaceLifecycle = "starting"
+	SurfaceLifecycleRunning		SurfaceLifecycle = "running"
+	SurfaceLifecycleSuspended	SurfaceLifecycle = "suspended"
+	SurfaceLifecycleCrashed		SurfaceLifecycle = "crashed"
 )
 
 const (
-	SurfaceAttentionUnknown SurfaceAttention = "unknown"
-	SurfaceAttentionNormal  SurfaceAttention = "normal"
-	SurfaceAttentionNotice  SurfaceAttention = "notice"
-	SurfaceAttentionUrgent  SurfaceAttention = "urgent"
+	SurfaceAttentionUnknown	SurfaceAttention = "unknown"
+	SurfaceAttentionNormal	SurfaceAttention = "normal"
+	SurfaceAttentionNotice	SurfaceAttention = "notice"
+	SurfaceAttentionUrgent	SurfaceAttention = "urgent"
 )
 
 const (
-	SurfaceActivityUnknown SurfaceActivity = "unknown"
-	SurfaceActivityIdle    SurfaceActivity = "idle"
-	SurfaceActivityWorking SurfaceActivity = "working"
-	SurfaceActivityWaiting SurfaceActivity = "waiting"
-	SurfaceActivityProgress SurfaceActivity = "progress"
+	SurfaceActivityUnknown	SurfaceActivity = "unknown"
+	SurfaceActivityIdle	SurfaceActivity = "idle"
+	SurfaceActivityWorking	SurfaceActivity = "working"
+	SurfaceActivityWaiting	SurfaceActivity = "waiting"
+	SurfaceActivityProgress	SurfaceActivity = "progress"
 )
 
 const (
-	SurfaceResourceUnknown SurfaceResourceState = "unknown"
-	SurfaceResourceClean   SurfaceResourceState = "clean"
-	SurfaceResourceDirty   SurfaceResourceState = "dirty"
-	SurfaceResourceSyncing SurfaceResourceState = "syncing"
-	SurfaceResourceError   SurfaceResourceState = "error"
+	SurfaceResourceUnknown	SurfaceResourceState = "unknown"
+	SurfaceResourceClean	SurfaceResourceState = "clean"
+	SurfaceResourceDirty	SurfaceResourceState = "dirty"
+	SurfaceResourceSyncing	SurfaceResourceState = "syncing"
+	SurfaceResourceError	SurfaceResourceState = "error"
 )
 
 const (
-	CapabilityWindowList     SurfaceCapability = "window.list"
-	CapabilityWindowActivate SurfaceCapability = "window.activate"
-	CapabilityWindowPreview  SurfaceCapability = "window.preview"
-	CapabilityViewList       SurfaceCapability = "view.list"
-	CapabilityViewActivate   SurfaceCapability = "view.activate"
-	CapabilityMediaObserve   SurfaceCapability = "media.observe"
+	CapabilityWindowList		SurfaceCapability = "window.list"
+	CapabilityWindowActivate	SurfaceCapability = "window.activate"
+	CapabilityWindowPreview		SurfaceCapability = "window.preview"
+	CapabilityViewList		SurfaceCapability = "view.list"
+	CapabilityViewActivate		SurfaceCapability = "view.activate"
+	CapabilityMediaObserve		SurfaceCapability = "media.observe"
 )
 
 type SurfaceObjectRef struct {
-	ProviderID SurfaceProviderID `json:"provider_id"`
-	SessionID  string            `json:"session_id"`
-	LocalID    string            `json:"local_id"`
+	ProviderID	SurfaceProviderID	`json:"provider_id"`
+	SessionID	string			`json:"session_id"`
+	LocalID		string			`json:"local_id"`
 }
 
 func (r SurfaceObjectRef) Valid() bool {
@@ -72,96 +68,96 @@ func (r SurfaceObjectRef) Valid() bool {
 }
 
 type SurfaceMediaState struct {
-	Audio      bool `json:"audio"`
-	Microphone bool `json:"microphone"`
-	Camera     bool `json:"camera"`
+	Audio		bool	`json:"audio"`
+	Microphone	bool	`json:"microphone"`
+	Camera		bool	`json:"camera"`
 }
 
 type SurfaceWindow struct {
-	ID        SurfaceWindowID `json:"id"`
-	Source    SurfaceObjectRef `json:"source"`
-	Title     string           `json:"title,omitempty"`
-	Focused   bool             `json:"focused"`
-	Workspace int              `json:"workspace,omitempty"`
-	Monitor   string           `json:"monitor,omitempty"`
-	MRURank   int              `json:"mru_rank,omitempty"`
+	ID		SurfaceWindowID		`json:"id"`
+	Source		SurfaceObjectRef	`json:"source"`
+	Title		string			`json:"title,omitempty"`
+	Focused		bool			`json:"focused"`
+	Workspace	int			`json:"workspace,omitempty"`
+	Monitor		string			`json:"monitor,omitempty"`
+	MRURank		int			`json:"mru_rank,omitempty"`
 }
 
 type SurfaceView struct {
-	ID            SurfaceViewID   `json:"id"`
-	Source        SurfaceObjectRef `json:"source"`
-	WindowID      SurfaceWindowID `json:"window_id,omitempty"`
-	Kind          string          `json:"kind,omitempty"`
-	Title         string          `json:"title,omitempty"`
-	ResourceRef   string          `json:"resource_ref,omitempty"`
-	Active        bool            `json:"active"`
-	Pinned        bool            `json:"pinned"`
-	Dirty         bool            `json:"dirty"`
-	ProgressKnown bool            `json:"progress_known"`
-	Progress      float64         `json:"progress,omitempty"`
-	Attention     SurfaceAttention `json:"attention,omitempty"`
-	MRURank       int              `json:"mru_rank,omitempty"`
+	ID		SurfaceViewID		`json:"id"`
+	Source		SurfaceObjectRef	`json:"source"`
+	WindowID	SurfaceWindowID		`json:"window_id,omitempty"`
+	Kind		string			`json:"kind,omitempty"`
+	Title		string			`json:"title,omitempty"`
+	ResourceRef	string			`json:"resource_ref,omitempty"`
+	Active		bool			`json:"active"`
+	Pinned		bool			`json:"pinned"`
+	Dirty		bool			`json:"dirty"`
+	ProgressKnown	bool			`json:"progress_known"`
+	Progress	float64			`json:"progress,omitempty"`
+	Attention	SurfaceAttention	`json:"attention,omitempty"`
+	MRURank		int			`json:"mru_rank,omitempty"`
 }
 
 type ApplicationSurface struct {
-	ID           SurfaceID             `json:"id"`
-	AppID        string                `json:"app_id"`
-	Title        string                `json:"title,omitempty"`
-	IconName     string                `json:"icon_name,omitempty"`
-	Lifecycle    SurfaceLifecycle      `json:"lifecycle"`
-	Attention    SurfaceAttention      `json:"attention"`
-	Activity     SurfaceActivity       `json:"activity"`
-	Resource     SurfaceResourceState  `json:"resource"`
-	Media        SurfaceMediaState     `json:"media"`
-	Windows      []SurfaceWindow       `json:"windows,omitempty"`
-	Views        []SurfaceView         `json:"views,omitempty"`
-	Capabilities []SurfaceCapability   `json:"capabilities,omitempty"`
-	Providers    []SurfaceProviderID   `json:"providers,omitempty"`
-	Partial      bool                  `json:"partial"`
-	Stale        bool                  `json:"stale"`
+	ID		SurfaceID		`json:"id"`
+	AppID		string			`json:"app_id"`
+	Title		string			`json:"title,omitempty"`
+	IconName	string			`json:"icon_name,omitempty"`
+	Lifecycle	SurfaceLifecycle	`json:"lifecycle"`
+	Attention	SurfaceAttention	`json:"attention"`
+	Activity	SurfaceActivity		`json:"activity"`
+	Resource	SurfaceResourceState	`json:"resource"`
+	Media		SurfaceMediaState	`json:"media"`
+	Windows		[]SurfaceWindow		`json:"windows,omitempty"`
+	Views		[]SurfaceView		`json:"views,omitempty"`
+	Capabilities	[]SurfaceCapability	`json:"capabilities,omitempty"`
+	Providers	[]SurfaceProviderID	`json:"providers,omitempty"`
+	Partial		bool			`json:"partial"`
+	Stale		bool			`json:"stale"`
 }
 
 type SurfaceProviderSnapshot struct {
-	ProviderID   SurfaceProviderID  `json:"provider_id"`
-	SessionID    string             `json:"session_id"`
-	Revision     uint64             `json:"revision"`
-	Authority    int                `json:"authority"`
-	Connected    bool               `json:"connected"`
-	Stale        bool               `json:"stale"`
-	Partial      bool               `json:"partial"`
-	Capabilities []SurfaceCapability `json:"capabilities,omitempty"`
-	Surfaces     []ApplicationSurface `json:"surfaces,omitempty"`
+	ProviderID	SurfaceProviderID	`json:"provider_id"`
+	SessionID	string			`json:"session_id,omitempty"`
+	Revision	uint64			`json:"revision"`
+	Authority	int			`json:"authority"`
+	Connected	bool			`json:"connected"`
+	Stale		bool			`json:"stale"`
+	Partial		bool			`json:"partial"`
+	Capabilities	[]SurfaceCapability	`json:"capabilities,omitempty"`
+	Surfaces	[]ApplicationSurface	`json:"surfaces,omitempty"`
 }
 
 type SurfaceProviderStatus struct {
-	ProviderID   SurfaceProviderID   `json:"provider_id"`
-	Revision     uint64              `json:"revision"`
-	Authority    int                 `json:"authority"`
-	Connected    bool                `json:"connected"`
-	Stale        bool                `json:"stale"`
-	Partial      bool                `json:"partial"`
-	Capabilities []SurfaceCapability `json:"capabilities,omitempty"`
+	ProviderID	SurfaceProviderID	`json:"provider_id"`
+	Revision	uint64			`json:"revision"`
+	Authority	int			`json:"authority"`
+	Connected	bool			`json:"connected"`
+	Stale		bool			`json:"stale"`
+	Partial		bool			`json:"partial"`
+	Capabilities	[]SurfaceCapability	`json:"capabilities,omitempty"`
 }
 
 type SurfaceSnapshot struct {
-	Generation uint64                  `json:"generation"`
-	Revision   string                  `json:"revision"`
-	Providers  []SurfaceProviderStatus `json:"providers,omitempty"`
-	Surfaces   []ApplicationSurface    `json:"surfaces,omitempty"`
+	Generation	uint64				`json:"generation"`
+	Revision	string				`json:"revision"`
+	Providers	[]SurfaceProviderStatus		`json:"providers,omitempty"`
+	Surfaces	[]ApplicationSurface		`json:"surfaces,omitempty"`
 }
 
 type SurfaceDiff struct {
-	Added   []SurfaceID `json:"added,omitempty"`
-	Removed []SurfaceID `json:"removed,omitempty"`
-	Changed []SurfaceID `json:"changed,omitempty"`
+	Added		[]SurfaceID	`json:"added,omitempty"`
+	Removed		[]SurfaceID	`json:"removed,omitempty"`
+	Changed		[]SurfaceID	`json:"changed,omitempty"`
 }
 
 func (p SurfaceProviderSnapshot) Validate() error {
 	if !validID(p.ProviderID) {
 		return errors.New("surface: provider id is required")
 	}
-	if strings.TrimSpace(p.SessionID) == "" {
-		return fmt.Errorf("surface: provider %q requires session id", p.ProviderID)
+	if (p.Connected || len(p.Surfaces) > 0) && strings.TrimSpace(p.SessionID) == "" {
+		return fmt.Errorf("surface: connected provider %q requires session id", p.ProviderID)
 	}
 	if p.Authority < 0 {
 		return fmt.Errorf("surface: provider %q authority must be non-negative", p.ProviderID)
@@ -170,13 +166,12 @@ func (p SurfaceProviderSnapshot) Validate() error {
 		return fmt.Errorf("surface: provider %q: %w", p.ProviderID, err)
 	}
 	seen := make(map[SurfaceID]struct{}, len(p.Surfaces))
-	for i := range p.Surfaces {
-		s := p.Surfaces[i]
-		if _, ok := seen[s.ID]; ok {
-			return fmt.Errorf("surface: provider %q has duplicate surface id %q", p.ProviderID, s.ID)
+	for _, surface := range p.Surfaces {
+		if _, ok := seen[surface.ID]; ok {
+			return fmt.Errorf("surface: provider %q has duplicate surface id %q", p.ProviderID, surface.ID)
 		}
-		seen[s.ID] = struct{}{}
-		if err := s.Validate(); err != nil {
+		seen[surface.ID] = struct{}{}
+		if err := surface.Validate(); err != nil {
 			return fmt.Errorf("surface: provider %q: %w", p.ProviderID, err)
 		}
 	}
@@ -205,6 +200,7 @@ func (s ApplicationSurface) Validate() error {
 	if err := validateCapabilities(s.Capabilities); err != nil {
 		return fmt.Errorf("surface: %q: %w", s.ID, err)
 	}
+
 	windowIDs := make(map[SurfaceWindowID]struct{}, len(s.Windows))
 	for _, window := range s.Windows {
 		if !validID(window.ID) || !window.Source.Valid() {
@@ -218,6 +214,7 @@ func (s ApplicationSurface) Validate() error {
 		}
 		windowIDs[window.ID] = struct{}{}
 	}
+
 	viewIDs := make(map[SurfaceViewID]struct{}, len(s.Views))
 	for _, view := range s.Views {
 		if !validID(view.ID) || !view.Source.Valid() {
@@ -262,34 +259,34 @@ func AggregateSurfaceSnapshots(previous SurfaceSnapshot, providerSnapshots []Sur
 	providerSeen := make(map[SurfaceID]map[SurfaceProviderID]struct{})
 
 	for _, provider := range providers {
-		status := SurfaceProviderStatus{
-			ProviderID: provider.ProviderID,
-			Revision: provider.Revision,
-			Authority: provider.Authority,
-			Connected: provider.Connected,
-			Stale: provider.Stale,
-			Partial: provider.Partial,
-			Capabilities: normalizedCapabilities(provider.Capabilities),
-		}
-		statuses = append(statuses, status)
+		statuses = append(statuses, SurfaceProviderStatus{
+			ProviderID:	provider.ProviderID,
+			Revision:	provider.Revision,
+			Authority:	provider.Authority,
+			Connected:	provider.Connected,
+			Stale:		provider.Stale,
+			Partial:	provider.Partial,
+			Capabilities:	normalizedCapabilities(provider.Capabilities),
+		})
 		if !provider.Connected {
 			continue
 		}
+
 		for _, incoming := range provider.Surfaces {
 			current := acc[incoming.ID]
 			if current == nil {
 				base := ApplicationSurface{
-					ID: incoming.ID,
-					AppID: incoming.AppID,
-					Title: incoming.Title,
-					IconName: incoming.IconName,
-					Lifecycle: normalizeLifecycle(incoming.Lifecycle),
-					Attention: normalizeAttention(incoming.Attention),
-					Activity: normalizeActivity(incoming.Activity),
-					Resource: normalizeResourceState(incoming.Resource),
-					Media: incoming.Media,
-					Partial: incoming.Partial || provider.Partial,
-					Stale: incoming.Stale || provider.Stale,
+					ID:		incoming.ID,
+					AppID:		incoming.AppID,
+					Title:		incoming.Title,
+					IconName:	incoming.IconName,
+					Lifecycle:	normalizeLifecycle(incoming.Lifecycle),
+					Attention:	normalizeAttention(incoming.Attention),
+					Activity:	normalizeActivity(incoming.Activity),
+					Resource:	normalizeResourceState(incoming.Resource),
+					Media:		incoming.Media,
+					Partial:	incoming.Partial || provider.Partial,
+					Stale:		incoming.Stale || provider.Stale,
 				}
 				acc[incoming.ID] = &base
 				current = &base
@@ -307,10 +304,11 @@ func AggregateSurfaceSnapshots(previous SurfaceSnapshot, providerSnapshots []Sur
 			}
 
 			providerSeen[incoming.ID][provider.ProviderID] = struct{}{}
-			for _, capability := range append(provider.Capabilities, incoming.Capabilities...) {
-				if strings.TrimSpace(string(capability)) != "" {
-					capSeen[incoming.ID][capability] = struct{}{}
-				}
+			for _, capability := range provider.Capabilities {
+				capSeen[incoming.ID][capability] = struct{}{}
+			}
+			for _, capability := range incoming.Capabilities {
+				capSeen[incoming.ID][capability] = struct{}{}
 			}
 			for _, window := range incoming.Windows {
 				if _, exists := windowSeen[incoming.ID][window.ID]; exists {
@@ -366,6 +364,7 @@ func DiffSurfaceSnapshots(before, after SurfaceSnapshot) SurfaceDiff {
 	for _, surface := range after.Surfaces {
 		right[surface.ID] = surface
 	}
+
 	var diff SurfaceDiff
 	for id, oldSurface := range left {
 		newSurface, ok := right[id]
@@ -388,21 +387,17 @@ func DiffSurfaceSnapshots(before, after SurfaceSnapshot) SurfaceDiff {
 	return diff
 }
 
-func cloneSurfaceSnapshot(in SurfaceSnapshot) SurfaceSnapshot {
-	out := SurfaceSnapshot{Generation: in.Generation, Revision: in.Revision}
-	out.Providers = append([]SurfaceProviderStatus(nil), in.Providers...)
+func (s SurfaceSnapshot) Clone() SurfaceSnapshot {
+	out := SurfaceSnapshot{Generation: s.Generation, Revision: s.Revision}
+	out.Providers = append([]SurfaceProviderStatus(nil), s.Providers...)
 	for i := range out.Providers {
-		out.Providers[i].Capabilities = append([]SurfaceCapability(nil), in.Providers[i].Capabilities...)
+		out.Providers[i].Capabilities = append([]SurfaceCapability(nil), s.Providers[i].Capabilities...)
 	}
-	out.Surfaces = make([]ApplicationSurface, len(in.Surfaces))
-	for i := range in.Surfaces {
-		out.Surfaces[i] = cloneSurface(in.Surfaces[i])
+	out.Surfaces = make([]ApplicationSurface, len(s.Surfaces))
+	for i := range s.Surfaces {
+		out.Surfaces[i] = cloneSurface(s.Surfaces[i])
 	}
 	return out
-}
-
-func (s SurfaceSnapshot) Clone() SurfaceSnapshot {
-	return cloneSurfaceSnapshot(s)
 }
 
 func cloneSurface(in ApplicationSurface) ApplicationSurface {
@@ -467,26 +462,27 @@ func mergeScalarSurface(dst *ApplicationSurface, src ApplicationSurface) {
 
 func surfaceSnapshotRevision(snapshot SurfaceSnapshot) (string, error) {
 	type semanticProvider struct {
-		ProviderID   SurfaceProviderID   `json:"provider_id"`
-		Authority    int                 `json:"authority"`
-		Connected    bool                `json:"connected"`
-		Stale        bool                `json:"stale"`
-		Partial      bool                `json:"partial"`
-		Capabilities []SurfaceCapability `json:"capabilities,omitempty"`
+		ProviderID	SurfaceProviderID	`json:"provider_id"`
+		Authority	int			`json:"authority"`
+		Connected	bool			`json:"connected"`
+		Stale		bool			`json:"stale"`
+		Partial		bool			`json:"partial"`
+		Capabilities	[]SurfaceCapability	`json:"capabilities,omitempty"`
 	}
 	type semanticSnapshot struct {
-		Providers []semanticProvider   `json:"providers,omitempty"`
-		Surfaces  []ApplicationSurface `json:"surfaces,omitempty"`
+		Providers	[]semanticProvider	`json:"providers,omitempty"`
+		Surfaces	[]ApplicationSurface	`json:"surfaces,omitempty"`
 	}
+
 	semantic := semanticSnapshot{Surfaces: snapshot.Surfaces}
 	for _, provider := range snapshot.Providers {
 		semantic.Providers = append(semantic.Providers, semanticProvider{
-			ProviderID: provider.ProviderID,
-			Authority: provider.Authority,
-			Connected: provider.Connected,
-			Stale: provider.Stale,
-			Partial: provider.Partial,
-			Capabilities: provider.Capabilities,
+			ProviderID:	provider.ProviderID,
+			Authority:	provider.Authority,
+			Connected:	provider.Connected,
+			Stale:		provider.Stale,
+			Partial:	provider.Partial,
+			Capabilities:	provider.Capabilities,
 		})
 	}
 	payload, err := json.Marshal(semantic)

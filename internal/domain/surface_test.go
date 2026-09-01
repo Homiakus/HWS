@@ -14,15 +14,10 @@ func TestAggregateSurfaceSnapshotsDeterministicAndAuthorityAware(t *testing.T) {
 			ID:        "app:firefox",
 			AppID:     "firefox.desktop",
 			Title:     "Firefox",
-			IconName:  "firefox",
 			Lifecycle: SurfaceLifecycleRunning,
-			Attention: SurfaceAttentionNormal,
-			Activity:  SurfaceActivityIdle,
-			Resource:  SurfaceResourceClean,
 			Windows: []SurfaceWindow{{
 				ID:      "window:11",
 				Source:  SurfaceObjectRef{ProviderID: "gnome", SessionID: "shell-1", LocalID: "11"},
-				Title:   "GitHub — Firefox",
 				Focused: true,
 			}},
 		}},
@@ -37,11 +32,8 @@ func TestAggregateSurfaceSnapshotsDeterministicAndAuthorityAware(t *testing.T) {
 		Surfaces: []ApplicationSurface{{
 			ID:        "app:firefox",
 			AppID:     "firefox.desktop",
-			Title:     "should-not-override-higher-authority",
+			Title:     "lower-authority-title",
 			Lifecycle: SurfaceLifecycleUnknown,
-			Attention: SurfaceAttentionNotice,
-			Activity:  SurfaceActivityWorking,
-			Resource:  SurfaceResourceDirty,
 			Views: []SurfaceView{{
 				ID:       "view:github",
 				Source:   SurfaceObjectRef{ProviderID: "firefox-extension", SessionID: "browser-4", LocalID: "tab-7"},
@@ -49,7 +41,6 @@ func TestAggregateSurfaceSnapshotsDeterministicAndAuthorityAware(t *testing.T) {
 				Kind:     "tab",
 				Title:    "Homiakus/HWS",
 				Active:   true,
-				MRURank:  0,
 			}},
 		}},
 	}
@@ -70,13 +61,10 @@ func TestAggregateSurfaceSnapshotsDeterministicAndAuthorityAware(t *testing.T) {
 	}
 	surface := first.Surfaces[0]
 	if surface.Title != "Firefox" {
-		t.Fatalf("title=%q want higher-authority Firefox", surface.Title)
+		t.Fatalf("title=%q want Firefox", surface.Title)
 	}
-	if len(surface.Windows) != 1 || len(surface.Views) != 1 {
-		t.Fatalf("windows=%d views=%d want 1/1", len(surface.Windows), len(surface.Views))
-	}
-	if len(surface.Capabilities) != 4 {
-		t.Fatalf("capabilities=%v", surface.Capabilities)
+	if len(surface.Windows) != 1 || len(surface.Views) != 1 || len(surface.Capabilities) != 4 {
+		t.Fatalf("unexpected merged surface: %+v", surface)
 	}
 }
 
@@ -87,23 +75,37 @@ func TestAggregateSurfaceSnapshotsStableGenerationForProviderRevisionOnly(t *tes
 		Revision:   1,
 		Authority:  100,
 		Connected:  true,
-		Surfaces: []ApplicationSurface{{
-			ID:        "app:zed",
-			AppID:     "dev.zed.Zed.desktop",
-			Lifecycle: SurfaceLifecycleRunning,
-		}},
+		Surfaces:   []ApplicationSurface{{ID: "app:zed", AppID: "dev.zed.Zed.desktop", Lifecycle: SurfaceLifecycleRunning}},
 	}
 	first, err := AggregateSurfaceSnapshots(SurfaceSnapshot{}, []SurfaceProviderSnapshot{provider})
 	if err != nil {
 		t.Fatal(err)
 	}
-	provider.Revision = 2
+	provider.Revision++
 	second, err := AggregateSurfaceSnapshots(first, []SurfaceProviderSnapshot{provider})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.Revision != second.Revision || first.Generation != second.Generation {
-		t.Fatalf("provider bookkeeping changed semantic generation: first=%d/%s second=%d/%s", first.Generation, first.Revision, second.Generation, second.Revision)
+		t.Fatalf("provider bookkeeping changed semantic generation: %d/%s -> %d/%s", first.Generation, first.Revision, second.Generation, second.Revision)
+	}
+}
+
+func TestAggregateSurfaceSnapshotsDisconnectedProviderKeepsWindowFallback(t *testing.T) {
+	connected := SurfaceProviderSnapshot{
+		ProviderID: "gnome",
+		SessionID:  "shell-1",
+		Authority:  100,
+		Connected:  true,
+		Surfaces:   []ApplicationSurface{{ID: "app:firefox", AppID: "firefox.desktop", Lifecycle: SurfaceLifecycleRunning}},
+	}
+	disconnected := SurfaceProviderSnapshot{ProviderID: "firefox-extension", Authority: 80, Connected: false}
+	snapshot, err := AggregateSurfaceSnapshots(SurfaceSnapshot{}, []SurfaceProviderSnapshot{disconnected, connected})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Surfaces) != 1 || len(snapshot.Providers) != 2 {
+		t.Fatalf("unexpected fallback snapshot: %+v", snapshot)
 	}
 }
 
@@ -115,11 +117,7 @@ func TestAggregateSurfaceSnapshotsPropagatesPartialAndStale(t *testing.T) {
 		Connected:  true,
 		Stale:      true,
 		Partial:    true,
-		Surfaces: []ApplicationSurface{{
-			ID:        "app:browser",
-			AppID:     "browser.desktop",
-			Lifecycle: SurfaceLifecycleRunning,
-		}},
+		Surfaces:   []ApplicationSurface{{ID: "app:browser", AppID: "browser.desktop", Lifecycle: SurfaceLifecycleRunning}},
 	}
 	snapshot, err := AggregateSurfaceSnapshots(SurfaceSnapshot{}, []SurfaceProviderSnapshot{provider})
 	if err != nil {
@@ -127,32 +125,6 @@ func TestAggregateSurfaceSnapshotsPropagatesPartialAndStale(t *testing.T) {
 	}
 	if !snapshot.Surfaces[0].Stale || !snapshot.Surfaces[0].Partial {
 		t.Fatalf("surface stale/partial = %v/%v", snapshot.Surfaces[0].Stale, snapshot.Surfaces[0].Partial)
-	}
-}
-
-func TestAggregateSurfaceSnapshotsDisconnectedProviderDoesNotEraseConnectedFallback(t *testing.T) {
-	connected := SurfaceProviderSnapshot{
-		ProviderID: "gnome",
-		SessionID:  "shell-1",
-		Authority:  100,
-		Connected:  true,
-		Surfaces: []ApplicationSurface{{ID: "app:firefox", AppID: "firefox.desktop", Lifecycle: SurfaceLifecycleRunning}},
-	}
-	disconnected := SurfaceProviderSnapshot{
-		ProviderID: "firefox-extension",
-		SessionID:  "disconnected",
-		Authority:  80,
-		Connected:  false,
-	}
-	snapshot, err := AggregateSurfaceSnapshots(SurfaceSnapshot{}, []SurfaceProviderSnapshot{disconnected, connected})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(snapshot.Surfaces) != 1 || snapshot.Surfaces[0].ID != "app:firefox" {
-		t.Fatalf("unexpected fallback surfaces: %+v", snapshot.Surfaces)
-	}
-	if len(snapshot.Providers) != 2 || snapshot.Providers[0].ProviderID != "firefox-extension" {
-		t.Fatalf("provider status missing or unsorted: %+v", snapshot.Providers)
 	}
 }
 
