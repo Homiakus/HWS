@@ -11,6 +11,7 @@ import {
     buildTreeModel,
     rowsForPath,
     sanitizePath,
+    searchTree,
     selectPathNode,
 } from './homeGridModel.js';
 
@@ -42,6 +43,7 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
         this._model = null;
         this._path = [];
         this._rowButtons = [];
+        this._searchButtons = [];
         this._statusText = '';
         this._statusError = false;
 
@@ -68,6 +70,38 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
         this._header.add_child(this._title);
         this._header.add_child(this._revision);
 
+        this._search = new St.Entry({
+            style_class: 'hws-home-search',
+            hint_text: 'Jump to context, project, task or workspace…',
+            can_focus: true,
+            x_expand: true,
+        });
+        this._search.clutter_text.connect('text-changed', () => this._renderSearch());
+        this._search.clutter_text.connect('key-press-event', (_actor, event) => {
+            const key = event.get_key_symbol();
+            if (key === Clutter.KEY_Down && this._searchButtons.length > 0) {
+                this._searchButtons[0].grab_key_focus();
+                return Clutter.EVENT_STOP;
+            }
+            if ((key === Clutter.KEY_Return || key === Clutter.KEY_KP_Enter) && this._searchButtons.length > 0) {
+                this._searchButtons[0].clicked();
+                return Clutter.EVENT_STOP;
+            }
+            if (key === Clutter.KEY_Escape) {
+                if (this._search.get_text())
+                    this._search.set_text('');
+                else
+                    this.close(global.get_current_time());
+                return Clutter.EVENT_STOP;
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+        this._searchResults = new St.BoxLayout({
+            vertical: true,
+            style_class: 'hws-home-search-results',
+            x_expand: true,
+        });
+
         this._breadcrumbs = new St.BoxLayout({
             vertical: false,
             style_class: 'hws-home-breadcrumbs',
@@ -78,19 +112,30 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
             style_class: 'hws-home-rows',
             x_expand: true,
         });
+        this._rowsViewport = new St.ScrollView({
+            style_class: 'hws-home-rows-viewport',
+            x_expand: true,
+            y_expand: true,
+            overlay_scrollbars: true,
+        });
+        this._rowsViewport.set_policy(St.PolicyType.NEVER, St.PolicyType.AUTOMATIC);
+        this._rowsViewport.set_child(this._rows);
+
         this._status = new St.Label({
             style_class: 'hws-home-status',
             x_expand: true,
         });
         this._hint = new St.Label({
-            text: '←/→ choose · ↑/↓ level · Enter open · Backspace parent · Esc close',
+            text: '←/→ choose · ↑/↓ level · Enter open · Backspace parent · Ctrl+K search · Esc close',
             style_class: 'hws-home-hint',
             x_expand: true,
         });
 
         this._root.add_child(this._header);
+        this._root.add_child(this._search);
+        this._root.add_child(this._searchResults);
         this._root.add_child(this._breadcrumbs);
-        this._root.add_child(this._rows);
+        this._root.add_child(this._rowsViewport);
         this._root.add_child(this._status);
         this._root.add_child(this._hint);
         this.contentLayout.add_child(this._root);
@@ -126,6 +171,7 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
         if (!this._model)
             return;
         this._path = [this._model.rootId];
+        this._search.set_text('');
         this._render();
         this._focusTile(0, 0);
     }
@@ -141,15 +187,20 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
         this._breadcrumbs.destroy_all_children();
         this._rows.destroy_all_children();
         this._rowButtons = [];
+        this._search.visible = this._available && Boolean(this._model);
 
         if (!this._available) {
             this._revision.text = '';
+            this._searchResults.destroy_all_children();
+            this._searchResults.visible = false;
             this._setStatus('hwsd is unavailable. Activity Strip fallback remains active.', true);
             this._hint.visible = false;
             return;
         }
         if (!this._model) {
             this._revision.text = '';
+            this._searchResults.destroy_all_children();
+            this._searchResults.visible = false;
             this._setStatus(this._statusText || 'Loading hierarchy…', this._statusError);
             this._hint.visible = false;
             return;
@@ -203,6 +254,67 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
             this._setStatus(this._statusText, this._statusError);
         }
         this._hint.visible = true;
+        this._renderSearch();
+    }
+
+    _renderSearch() {
+        this._searchResults.destroy_all_children();
+        this._searchButtons = [];
+        if (!this._available || !this._model || !this._search.visible) {
+            this._searchResults.visible = false;
+            return;
+        }
+        const query = this._search.get_text();
+        const results = searchTree(this._model, query, 8);
+        if (!query.trim() || results.length === 0) {
+            this._searchResults.visible = false;
+            return;
+        }
+        for (const result of results) {
+            const pathLabel = result.path
+                .map(id => this._model.byId.get(id)?.title)
+                .filter(Boolean)
+                .join(' › ');
+            const button = new St.Button({
+                label: `${pathLabel}   · ${result.node.kind}`,
+                style_class: 'hws-home-search-result',
+                can_focus: true,
+                x_expand: true,
+                x_align: Clutter.ActorAlign.FILL,
+            });
+            button.accessible_name = `Jump to ${pathLabel}`;
+            button.connect('clicked', () => this._jumpToPath(result.path));
+            button.connect('key-press-event', (_actor, event) => {
+                const key = event.get_key_symbol();
+                if (key === Clutter.KEY_Up || key === Clutter.KEY_Down) {
+                    const index = this._searchButtons.indexOf(button);
+                    const delta = key === Clutter.KEY_Up ? -1 : 1;
+                    const next = index + delta;
+                    if (next < 0)
+                        this._search.grab_key_focus();
+                    else if (next < this._searchButtons.length)
+                        this._searchButtons[next].grab_key_focus();
+                    return Clutter.EVENT_STOP;
+                }
+                if (key === Clutter.KEY_Escape) {
+                    this._search.set_text('');
+                    this._search.grab_key_focus();
+                    return Clutter.EVENT_STOP;
+                }
+                return Clutter.EVENT_PROPAGATE;
+            });
+            this._searchResults.add_child(button);
+            this._searchButtons.push(button);
+        }
+        this._searchResults.visible = true;
+    }
+
+    _jumpToPath(path) {
+        this._path = sanitizePath(this._model, path);
+        const selected = this._path.at(-1);
+        this._search.set_text('');
+        this._render();
+        this._focusSelected(Math.max(0, this._path.length - 2), selected);
     }
 
     _renderBreadcrumbs() {
@@ -244,6 +356,11 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
 
     _handleTileKey(event, rowIndex, itemIndex) {
         const key = event.get_key_symbol();
+        const state = event.get_state();
+        if ((state & Clutter.ModifierType.CONTROL_MASK) && (key === Clutter.KEY_k || key === Clutter.KEY_K)) {
+            this._search.grab_key_focus();
+            return Clutter.EVENT_STOP;
+        }
         switch (key) {
         case Clutter.KEY_Left:
             this._focusTile(rowIndex, itemIndex - 1);
