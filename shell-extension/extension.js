@@ -11,6 +11,7 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {AppCapsule} from './appCapsule.js';
 import {DaemonClient} from './daemonClient.js';
+import {installHomeGrid} from './homeGrid.js';
 
 const MAX_INLINE_WINDOWS = 4;
 const SHELL_SNAPSHOT_SCHEMA = 1;
@@ -450,6 +451,7 @@ class ActivityStripIndicator extends PanelMenu.Button {
 
 export default class HWSExtension extends Extension {
     enable() {
+        this._home = installHomeGrid();
         this._indicator = new ActivityStripIndicator();
         Main.panel.addToStatusArea('hws-activity-strip', this._indicator, 0, 'center');
     }
@@ -457,5 +459,7 @@ export default class HWSExtension extends Extension {
     disable() {
         this._indicator?.destroy();
         this._indicator = null;
+        this._home?.destroy();
+        this._home = null;
     }
 }
