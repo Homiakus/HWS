@@ -44,6 +44,7 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
         this._path = [];
         this._rowButtons = [];
         this._searchButtons = [];
+        this._searchPaths = [];
         this._statusText = '';
         this._statusError = false;
 
@@ -83,8 +84,8 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
                 this._searchButtons[0].grab_key_focus();
                 return Clutter.EVENT_STOP;
             }
-            if ((key === Clutter.KEY_Return || key === Clutter.KEY_KP_Enter) && this._searchButtons.length > 0) {
-                this._searchButtons[0].clicked();
+            if ((key === Clutter.KEY_Return || key === Clutter.KEY_KP_Enter) && this._searchPaths.length > 0) {
+                this._jumpToPath(this._searchPaths[0]);
                 return Clutter.EVENT_STOP;
             }
             if (key === Clutter.KEY_Escape) {
@@ -260,6 +261,7 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
     _renderSearch() {
         this._searchResults.destroy_all_children();
         this._searchButtons = [];
+        this._searchPaths = [];
         if (!this._available || !this._model || !this._search.visible) {
             this._searchResults.visible = false;
             return;
@@ -305,6 +307,7 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
             });
             this._searchResults.add_child(button);
             this._searchButtons.push(button);
+            this._searchPaths.push(result.path);
         }
         this._searchResults.visible = true;
     }
