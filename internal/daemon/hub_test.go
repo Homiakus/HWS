@@ -23,7 +23,7 @@ func TestHubUsesLastKnownGoodPanelAndProjectsRichViews(t *testing.T) {
 		AllowOrphan: true, ApplicationName: "Firefox", ObservedAt: time.Unix(100, 0), TTL: time.Minute,
 		Revision: 1, Confidence: surface.ConfidenceAuthoritative,
 		Capabilities: []surface.Capability{surface.CapabilityViewObserve, surface.CapabilityViewActivate},
-		Windows: []providers.WindowPatch{{ProviderWindowID: "1", Views: []surface.View{{ID: "tab:7", Kind: surface.ViewTab, Title: "HWS", Active: true}}}},
+		Windows:      []providers.WindowPatch{{ProviderWindowID: "1", Views: []surface.View{{ID: "tab:7", Kind: surface.ViewTab, Title: "HWS", Active: true}}}},
 	}); err != nil {
 		t.Fatal(err)
 	}
