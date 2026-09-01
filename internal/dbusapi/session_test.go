@@ -42,3 +42,44 @@ func TestSessionRoundTrip(t *testing.T) {
 		t.Fatalf("panel=%q", panelJSON)
 	}
 }
+
+func TestGoClientRoundTrip(t *testing.T) {
+	if os.Getenv("DBUS_SESSION_BUS_ADDRESS") == "" {
+		t.Skip("requires a session bus; CI runs this test under dbus-run-session")
+	}
+	backend := &fakeBackend{
+		panel:  `{"revision":9,"cards":[]}`,
+		spec:   `{"revision":2,"valid":true}`,
+		health: `{"status":"ok","applications":1}`,
+		app:    `{"appId":"code.desktop"}`,
+	}
+	server, err := OpenSession(backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	client, err := ConnectSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	if client.ServerInstance() == "" || client.RevisionEpoch() == "" {
+		t.Fatal("client handshake did not preserve server cache identity")
+	}
+	if client.Capabilities()["health"] != "supported" {
+		t.Fatalf("health capability missing: %#v", client.Capabilities())
+	}
+	if got, err := client.HealthJSON(); err != nil || got != backend.health {
+		t.Fatalf("health=%q err=%v", got, err)
+	}
+	if got, err := client.PanelJSON(); err != nil || got != backend.panel {
+		t.Fatalf("panel=%q err=%v", got, err)
+	}
+	if got, err := client.SpecJSON(); err != nil || got != backend.spec {
+		t.Fatalf("spec=%q err=%v", got, err)
+	}
+	if got, err := client.ApplicationJSON("code.desktop"); err != nil || got != backend.app {
+		t.Fatalf("app=%q err=%v", got, err)
+	}
+}
