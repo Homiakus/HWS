@@ -11,7 +11,7 @@ import (
 
 type Runtime struct {
 	*Hub
-	hierarchy *contexttree.Manager
+	hierarchy     *contexttree.Manager
 	onTreeChanged func(uint64)
 }
 
