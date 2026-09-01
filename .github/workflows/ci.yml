@@ -50,6 +50,10 @@ jobs:
           node --input-type=module --check < shell-extension/extension.js
           node --input-type=module --check < shell-extension/appCapsule.js
           node --input-type=module --check < shell-extension/daemonClient.js
+          node --input-type=module --check < shell-extension/homeGrid.js
+          node --input-type=module --check < shell-extension/homeGridModel.js
+      - name: Home Grid model tests
+        run: node --test shell-extension/homeGridModel.test.mjs
       - name: JSON manifests
         shell: bash
         run: |
