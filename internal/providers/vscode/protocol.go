@@ -43,5 +43,5 @@ func (x Snapshot) ProviderSnapshot() providers.Snapshot {
 		rs = surface.ResourceDirty
 	}
 	summary := x.Workspace
-	return providers.Snapshot{ProviderID: "vscode", Kind: providers.SourceExtension, AppID: surface.ApplicationID(x.AppID), ObservedAt: x.CapturedAt, TTL: 30 * time.Second, Priority: 110, Revision: x.Revision, Confidence: surface.ConfidenceAuthoritative, Windows: []providers.WindowPatch{{Views: views}}, Status: surface.StatusPatch{Resource: &rs, Summary: &summary}, Capabilities: []surface.Capability{surface.CapabilityViewObserve, surface.CapabilityViewActivate, surface.CapabilityViewClose, surface.CapabilityViewDirty}}
+	return providers.Snapshot{ProviderID: "vscode", Kind: providers.SourceExtension, AppID: surface.ApplicationID(x.AppID), AllowOrphan: true, ApplicationName: "Visual Studio Code", ObservedAt: x.CapturedAt, TTL: 30 * time.Second, Priority: 110, Revision: x.Revision, Confidence: surface.ConfidenceAuthoritative, Windows: []providers.WindowPatch{{Views: views}}, Status: surface.StatusPatch{Resource: &rs, Summary: &summary}, Capabilities: []surface.Capability{surface.CapabilityViewObserve, surface.CapabilityViewActivate, surface.CapabilityViewClose, surface.CapabilityViewDirty}}
 }

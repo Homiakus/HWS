@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 
 	"github.com/Homiakus/HWS/internal/providers"
 	browserprovider "github.com/Homiakus/HWS/internal/providers/browser"
@@ -27,9 +26,12 @@ type Server struct {
 	Sink     Sink
 	mu       sync.Mutex
 	listener net.Listener
+	Actions  *Actions
 }
 
-func New(path string, sink Sink) *Server { return &Server{Path: path, Sink: sink} }
+func New(path string, sink Sink) *Server {
+	return &Server{Path: path, Sink: sink, Actions: NewActions()}
+}
 
 func (s *Server) Serve(ctx context.Context) error {
 	if s.Sink == nil {
@@ -71,7 +73,21 @@ func (s *Server) Serve(ctx context.Context) error {
 
 func (s *Server) handle(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
-	_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-done:
+		}
+	}()
+	var unregister func()
+	defer func() {
+		if unregister != nil {
+			unregister()
+		}
+	}()
 	scanner := bufio.NewScanner(conn)
 	buf := make([]byte, 64*1024)
 	scanner.Buffer(buf, wire.MaxEnvelopeBytes)
@@ -88,32 +104,40 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 		if err := env.Validate(); err != nil {
 			continue
 		}
-		_ = s.dispatch(env)
+		providerID, err := s.dispatch(env)
+		if err != nil {
+			continue
+		}
+		if providerID != "" && unregister == nil {
+			unregister = s.Actions.register(providerID, conn)
+		}
 	}
 }
 
-func (s *Server) dispatch(env wire.Envelope) error {
+func (s *Server) dispatch(env wire.Envelope) (string, error) {
 	switch env.Type {
 	case "browser.snapshot":
 		var x browserprovider.Snapshot
 		if err := json.Unmarshal(env.Payload, &x); err != nil {
-			return err
+			return "", err
 		}
 		if x.CapturedAt.IsZero() {
 			x.CapturedAt = env.ReceivedAt
 		}
-		return s.Sink.Ingest(x.ProviderSnapshot())
+		snapshot := x.ProviderSnapshot()
+		return snapshot.ProviderID, s.Sink.Ingest(snapshot)
 	case "vscode.snapshot":
 		var x vscodeprovider.Snapshot
 		if err := json.Unmarshal(env.Payload, &x); err != nil {
-			return err
+			return "", err
 		}
 		if x.CapturedAt.IsZero() {
 			x.CapturedAt = env.ReceivedAt
 		}
-		return s.Sink.Ingest(x.ProviderSnapshot())
+		snapshot := x.ProviderSnapshot()
+		return snapshot.ProviderID, s.Sink.Ingest(snapshot)
 	default:
-		return fmt.Errorf("provider message type %q unsupported", env.Type)
+		return "", fmt.Errorf("provider message type %q unsupported", env.Type)
 	}
 }
 

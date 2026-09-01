@@ -57,5 +57,5 @@ func (x Snapshot) ProviderSnapshot() providers.Snapshot {
 		}
 		return 0
 	})
-	return providers.Snapshot{ProviderID: "browser:" + x.Browser, Kind: providers.SourceExtension, AppID: surface.ApplicationID(x.AppID), ObservedAt: x.CapturedAt, TTL: 30 * time.Second, Priority: 100, Revision: x.Revision, Confidence: surface.ConfidenceAuthoritative, Windows: windows, Capabilities: []surface.Capability{surface.CapabilityViewObserve, surface.CapabilityViewActivate, surface.CapabilityViewClose}}
+	return providers.Snapshot{ProviderID: "browser:" + x.Browser, Kind: providers.SourceExtension, AppID: surface.ApplicationID(x.AppID), AllowOrphan: true, ApplicationName: x.Browser, ObservedAt: x.CapturedAt, TTL: 30 * time.Second, Priority: 100, Revision: x.Revision, Confidence: surface.ConfidenceAuthoritative, Windows: windows, Capabilities: []surface.Capability{surface.CapabilityViewObserve, surface.CapabilityViewActivate, surface.CapabilityViewClose}}
 }
