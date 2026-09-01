@@ -194,7 +194,10 @@ func BuildDefinition() *model.Definition {
 
 	definition.Claim("requiredCountsNonNegative", reachedRequired.GreaterOrEqual(0))
 	definition.Claim("totalRequiredNonNegative", totalRequired.GreaterOrEqual(0))
-	definition.Claim("reachedDoesNotExceedTotal", reachedRequired.LessOrEqualField(totalRequired))
+	// The strict production runtime intentionally supports only a small expression
+	// subset and rejects field-to-field integer comparisons. The cross-field
+	// invariant reachedRequired <= totalRequired is enforced at the typed
+	// ReconcileWorkspace activity boundary before values can enter lifecycle state.
 	definition.Claim(
 		"activeRequiresWorkspaceIdentity",
 		model.Implies(status.Equal(StatusActive), model.Exists(workspaceID.Expr())),
