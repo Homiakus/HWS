@@ -215,10 +215,13 @@ func (m *Manager) Revision() uint64 {
 	return m.revision
 }
 
+// Valid reports whether the current on-disk configuration is valid. A false
+// value does not imply that Snapshot is unavailable: the last-known-good tree
+// remains usable after a rejected reload.
 func (m *Manager) Valid() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.valid
+	return m.valid && m.lastErr == nil
 }
 
 func compile(data []byte) (*domain.Tree, []Node, error) {
