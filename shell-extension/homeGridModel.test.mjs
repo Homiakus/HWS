@@ -6,6 +6,7 @@ import {
     pathToNode,
     rowsForPath,
     sanitizePath,
+    searchTree,
     selectPathNode,
 } from './homeGridModel.js';
 
@@ -75,4 +76,22 @@ test('path lookup is fail-closed for unknown nodes', () => {
     const model = buildTreeModel(fixture());
     assert.deepEqual(pathToNode(model, 'hws'), ['root', 'dev', 'projects', 'hws']);
     assert.deepEqual(pathToNode(model, 'missing'), []);
+});
+
+test('search ranks title prefixes and returns navigable full paths', () => {
+    const model = buildTreeModel(fixture());
+    const byTitle = searchTree(model, 'dev');
+    assert.equal(byTitle[0].node.id, 'dev');
+    assert.deepEqual(byTitle[0].path, ['root', 'dev']);
+    assert.ok(byTitle.some(result => result.node.id === 'develop'));
+
+    const byWorkspace = searchTree(model, 'hws-dev');
+    assert.equal(byWorkspace[0].node.id, 'develop');
+    assert.deepEqual(byWorkspace[0].path, ['root', 'dev', 'projects', 'hws', 'develop']);
+});
+
+test('search is bounded and empty queries return no results', () => {
+    const model = buildTreeModel(fixture());
+    assert.deepEqual(searchTree(model, '   '), []);
+    assert.equal(searchTree(model, 'd', 1).length, 1);
 });
