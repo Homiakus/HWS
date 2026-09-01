@@ -7,15 +7,18 @@ const INTERFACE_NAME = 'org.homiakus.HWS1';
 const PROTOCOL_VERSION = 1;
 
 export class DaemonClient {
-    constructor({onCardsChanged = null, onAvailabilityChanged = null} = {}) {
+    constructor({onCardsChanged = null, onTreeChanged = null, onAvailabilityChanged = null} = {}) {
         this._onCardsChanged = onCardsChanged;
+        this._onTreeChanged = onTreeChanged;
         this._onAvailabilityChanged = onAvailabilityChanged;
         this._proxy = null;
         this._signals = [];
         this._cancellable = new Gio.Cancellable();
         this._refreshSource = 0;
+        this._treeRefreshSource = 0;
         this._cards = [];
         this._render = null;
+        this._tree = null;
         this._available = false;
         this._instance = GLib.uuid_string_random();
         this._connect();
@@ -27,6 +30,10 @@ export class DaemonClient {
 
     get render() {
         return this._render;
+    }
+
+    get tree() {
+        return this._tree;
     }
 
     get available() {
@@ -55,6 +62,8 @@ export class DaemonClient {
                 this._signals.push(this._proxy.connect('g-signal', (_proxy, _sender, signalName) => {
                     if (signalName === 'PanelChanged' || signalName === 'PanelConfigChanged')
                         this.queueRefresh();
+                    else if (signalName === 'TreeChanged')
+                        this.queueTreeRefresh();
                 }));
                 this._ownerChanged();
             }
@@ -66,8 +75,10 @@ export class DaemonClient {
         if (!owner) {
             this._cards = [];
             this._render = null;
+            this._tree = null;
             this._setAvailable(false);
             this._onCardsChanged?.(this._cards, this._render);
+            this._onTreeChanged?.(null);
             return;
         }
         this._call('Hello', new GLib.Variant('(us)', [PROTOCOL_VERSION, this._instance]), values => {
@@ -78,6 +89,7 @@ export class DaemonClient {
             }
             this._setAvailable(true);
             this.queueRefresh();
+            this.queueTreeRefresh();
         }, () => this._setAvailable(false));
     }
 
@@ -113,7 +125,7 @@ export class DaemonClient {
     }
 
     queueRefresh() {
-        if (!this._available || this._refreshSource)
+        if (!this._available || !this._onCardsChanged || this._refreshSource)
             return;
         this._refreshSource = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 30, () => {
             this._refreshSource = 0;
@@ -122,8 +134,18 @@ export class DaemonClient {
         });
     }
 
+    queueTreeRefresh() {
+        if (!this._available || !this._onTreeChanged || this._treeRefreshSource)
+            return;
+        this._treeRefreshSource = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 30, () => {
+            this._treeRefreshSource = 0;
+            this.refreshTree();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
     refresh() {
-        if (!this._available)
+        if (!this._available || !this._onCardsChanged)
             return;
         this._call('GetPanelSnapshot', null, values => {
             try {
@@ -135,6 +157,31 @@ export class DaemonClient {
                 // Keep the last valid snapshot on malformed daemon output.
             }
         });
+    }
+
+    refreshTree() {
+        if (!this._available || !this._onTreeChanged)
+            return;
+        this._call('GetTree', null, values => {
+            try {
+                const payload = JSON.parse(values[0]);
+                this._tree = payload && typeof payload === 'object' ? payload : null;
+                this._onTreeChanged?.(this._tree);
+            } catch (_error) {
+                // Keep the last valid tree on malformed daemon output.
+            }
+        });
+    }
+
+    getPath(nodeID, done) {
+        this._call('GetPath', new GLib.Variant('(s)', [nodeID]), values => {
+            try {
+                const payload = JSON.parse(values[0]);
+                done?.(Array.isArray(payload) ? payload : null);
+            } catch (_error) {
+                done?.(null);
+            }
+        }, () => done?.(null));
     }
 
     submitShellSnapshot(snapshot, done = null, failed = null) {
@@ -183,6 +230,10 @@ export class DaemonClient {
             GLib.source_remove(this._refreshSource);
             this._refreshSource = 0;
         }
+        if (this._treeRefreshSource) {
+            GLib.source_remove(this._treeRefreshSource);
+            this._treeRefreshSource = 0;
+        }
         this._cancellable.cancel();
         if (this._proxy) {
             for (const id of this._signals)
@@ -192,5 +243,6 @@ export class DaemonClient {
         this._proxy = null;
         this._cards = [];
         this._render = null;
+        this._tree = null;
     }
 }
