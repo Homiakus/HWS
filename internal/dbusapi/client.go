@@ -9,12 +9,12 @@ import (
 )
 
 type Client struct {
-	conn         *dbus.Conn
-	object       dbus.BusObject
-	instance     string
-	server       string
+	conn          *dbus.Conn
+	object        dbus.BusObject
+	instance      string
+	server        string
 	revisionEpoch string
-	capabilities map[string]string
+	capabilities  map[string]string
 }
 
 func ConnectSession() (*Client, error) {
