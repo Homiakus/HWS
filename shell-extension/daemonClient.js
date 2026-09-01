@@ -15,6 +15,7 @@ export class DaemonClient {
         this._cancellable = new Gio.Cancellable();
         this._refreshSource = 0;
         this._cards = [];
+        this._render = null;
         this._available = false;
         this._instance = GLib.uuid_string_random();
         this._connect();
@@ -22,6 +23,10 @@ export class DaemonClient {
 
     get cards() {
         return this._cards;
+    }
+
+    get render() {
+        return this._render;
     }
 
     get available() {
@@ -60,8 +65,9 @@ export class DaemonClient {
         const owner = this._proxy?.get_name_owner?.();
         if (!owner) {
             this._cards = [];
+            this._render = null;
             this._setAvailable(false);
-            this._onCardsChanged?.(this._cards);
+            this._onCardsChanged?.(this._cards, this._render);
             return;
         }
         this._call('Hello', new GLib.Variant('(us)', [PROTOCOL_VERSION, this._instance]), values => {
@@ -123,11 +129,35 @@ export class DaemonClient {
             try {
                 const payload = JSON.parse(values[0]);
                 this._cards = Array.isArray(payload.cards) ? payload.cards : [];
-                this._onCardsChanged?.(this._cards);
+                this._render = payload.render && typeof payload.render === 'object' ? payload.render : null;
+                this._onCardsChanged?.(this._cards, this._render);
             } catch (_error) {
                 // Keep the last valid snapshot on malformed daemon output.
             }
         });
+    }
+
+    submitShellSnapshot(snapshot, done = null, failed = null) {
+        if (!snapshot || typeof snapshot !== 'object') {
+            failed?.(new Error('shell snapshot is required'));
+            return;
+        }
+        this._call(
+            'SubmitShellSnapshot',
+            new GLib.Variant('(s)', [JSON.stringify(snapshot)]),
+            done,
+            failed
+        );
+    }
+
+    getHealth(done) {
+        this._call('GetHealth', null, values => {
+            try {
+                done?.(JSON.parse(values[0]));
+            } catch (_error) {
+                done?.(null);
+            }
+        }, () => done?.(null));
     }
 
     getApplicationSurface(appID, done) {
@@ -161,5 +191,6 @@ export class DaemonClient {
         this._signals = [];
         this._proxy = null;
         this._cards = [];
+        this._render = null;
     }
 }

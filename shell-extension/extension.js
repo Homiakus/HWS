@@ -13,6 +13,7 @@ import {AppCapsule} from './appCapsule.js';
 import {DaemonClient} from './daemonClient.js';
 
 const MAX_INLINE_WINDOWS = 4;
+const SHELL_SNAPSHOT_SCHEMA = 1;
 
 function needsAttention(window) {
     try {
@@ -28,15 +29,33 @@ function attentionRank(value) {
     return 1;
 }
 
-function strongestAttention(a, b) {
-    return attentionRank(a) >= attentionRank(b) ? a : b;
-}
-
 function connectOptional(target, signal, callback, bucket) {
     try {
         bucket.push([target, target.connect(signal, callback)]);
     } catch (_error) {
         // GNOME minor versions may not expose every optional signal.
+    }
+}
+
+function windowID(window) {
+    return `window:${window.get_stable_sequence()}`;
+}
+
+function workspaceID(window) {
+    try {
+        const index = window.get_workspace?.()?.index?.();
+        return Number.isInteger(index) && index >= 0 ? `workspace:${index}` : '';
+    } catch (_error) {
+        return '';
+    }
+}
+
+function monitorRef(window) {
+    try {
+        const index = window.get_monitor?.();
+        return Number.isInteger(index) && index >= 0 ? `monitor:${index}` : '';
+    } catch (_error) {
+        return '';
     }
 }
 
@@ -51,33 +70,52 @@ class ActivityStripIndicator extends PanelMenu.Button {
         this._cards = new Map();
         this._signals = [];
         this._refreshSource = 0;
-        this._richCards = [];
+        this._heartbeatSource = 0;
+        this._daemonCards = [];
+        this._panelRender = null;
+        this._shellRevision = 0;
+        this._lastShellSemantic = '';
+        this._forcePublish = false;
 
         connectOptional(global.display, 'notify::focus-window', () => this.queueRefresh(), this._signals);
         connectOptional(global.display, 'window-created', () => this.queueRefresh(), this._signals);
         connectOptional(global.display, 'window-demands-attention', () => this.queueRefresh(), this._signals);
+        connectOptional(global.display, 'window-marked-urgent', () => this.queueRefresh(), this._signals);
+        connectOptional(global.display, 'window-entered-monitor', () => this.queueRefresh(), this._signals);
+        connectOptional(global.display, 'window-left-monitor', () => this.queueRefresh(), this._signals);
         connectOptional(global.workspace_manager, 'active-workspace-changed', () => this.queueRefresh(), this._signals);
         connectOptional(this._appSystem, 'app-state-changed', () => this.queueRefresh(), this._signals);
 
         this._daemon = new DaemonClient({
-            onCardsChanged: cards => {
-                this._richCards = cards;
+            onCardsChanged: (cards, render) => {
+                this._daemonCards = cards;
+                this._panelRender = render;
                 this.queueRefresh();
             },
             onAvailabilityChanged: available => {
                 this.toggle_style_class_name('daemon-unavailable', !available);
+                if (!available)
+                    this._lastShellSemantic = '';
                 this.queueRefresh();
             },
+        });
+
+        this._heartbeatSource = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 2, () => {
+            this.queueRefresh(true);
+            return GLib.SOURCE_CONTINUE;
         });
         this.queueRefresh();
     }
 
-    queueRefresh() {
+    queueRefresh(forcePublish = false) {
+        this._forcePublish = this._forcePublish || forcePublish;
         if (this._refreshSource)
             return;
         this._refreshSource = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 40, () => {
             this._refreshSource = 0;
-            this._refresh();
+            const force = this._forcePublish;
+            this._forcePublish = false;
+            this._refresh(force);
             return GLib.SOURCE_REMOVE;
         });
     }
@@ -92,21 +130,22 @@ class ActivityStripIndicator extends PanelMenu.Button {
             const active = windows.find(window => window === focused) || windows[0];
             const attention = windows.some(needsAttention) ? 'attention' : 'normal';
             cards.push({
-                id: app.get_id() || `window:${active.get_stable_sequence()}`,
+                id: app.get_id() || windowID(active),
                 name: app.get_name?.() || 'Application',
                 title: active.get_title?.() || app.get_name?.() || 'Application',
                 subtitle: app.get_busy?.() ? 'Busy' : '',
+                busy: Boolean(app.get_busy?.()),
                 focused: windows.some(window => window === focused),
                 attention,
                 windowCount: windows.length,
                 surfaceCount: 0,
                 windows,
                 app,
-                iconActor: app.create_icon_texture?.(16) || null,
                 segments: windows.slice(0, MAX_INLINE_WINDOWS).map(window => ({
-                    id: `window:${window.get_stable_sequence()}`,
+                    id: windowID(window),
+                    kind: 'window',
                     title: window.get_title?.() || '',
-                    active: window === active,
+                    active: window === focused,
                     dirty: false,
                     attention: needsAttention(window) ? 'attention' : 'normal',
                     nativeWindow: true,
@@ -117,42 +156,100 @@ class ActivityStripIndicator extends PanelMenu.Button {
         return cards;
     }
 
-    _mergeCards(nativeCards, richCards) {
-        const byID = new Map(nativeCards.map(card => [card.id, card]));
-        for (const rich of richCards || []) {
-            const native = byID.get(rich.id);
-            if (!native) {
-                byID.set(rich.id, {
-                    ...rich,
-                    windows: [],
-                    app: null,
-                    providerOnly: true,
-                    focused: Boolean(rich.focused),
-                    iconActor: null,
-                });
-                continue;
-            }
-            native.title = rich.title || native.title;
-            native.subtitle = rich.subtitle || native.subtitle;
-            native.progress = typeof rich.progress === 'number' ? rich.progress : native.progress;
-            native.surfaceCount = rich.surfaceCount || native.surfaceCount;
-            if (Array.isArray(rich.segments) && rich.segments.length > 0) {
-                native.segments = rich.segments;
-                native.overflowCount = rich.overflowCount || 0;
-            }
-            native.attention = strongestAttention(native.attention, rich.attention || 'normal');
-            native.rich = true;
-        }
-        return [...byID.values()];
+    _shellPayload(nativeCards) {
+        return {
+            schema: SHELL_SNAPSHOT_SCHEMA,
+            apps: nativeCards.map(card => ({
+                appId: card.id,
+                name: card.name,
+                desktopAppId: card.id,
+                busy: Boolean(card.busy),
+                windows: card.windows.map(window => ({
+                    id: windowID(window),
+                    title: window.get_title?.() || '',
+                    workspaceId: workspaceID(window),
+                    monitorRef: monitorRef(window),
+                    focused: window === global.display.focus_window,
+                    minimized: Boolean(window.minimized),
+                    mru: Number(window.get_user_time?.() || 0),
+                    attention: needsAttention(window) ? 'attention' : 'normal',
+                })),
+            })),
+        };
     }
 
-    _refresh() {
-        const cards = this._mergeCards(this._nativeCards(), this._richCards);
+    _publishNative(nativeCards, force = false) {
+        if (!this._daemon.available)
+            return;
+        const base = this._shellPayload(nativeCards);
+        const semantic = JSON.stringify(base);
+        const changed = semantic !== this._lastShellSemantic;
+        if (!changed && !force)
+            return;
+        if (changed || this._shellRevision === 0)
+            this._shellRevision++;
+        this._lastShellSemantic = semantic;
+        this._daemon.submitShellSnapshot({
+            ...base,
+            revision: this._shellRevision,
+            capturedAt: new Date().toISOString(),
+        }, () => this._daemon.queueRefresh(), () => {
+            if (this._lastShellSemantic === semantic)
+                this._lastShellSemantic = '';
+        });
+    }
+
+    _enrichCards(daemonCards, nativeCards) {
+        const nativeByID = new Map(nativeCards.map(card => [card.id, card]));
+        const out = [];
+        const seen = new Set();
+
+        for (const daemonCard of daemonCards || []) {
+            const native = nativeByID.get(daemonCard.id);
+            const segments = (daemonCard.segments || []).map(segment => ({
+                ...segment,
+                nativeWindow: segment.kind === 'window',
+            }));
+            out.push({
+                ...daemonCard,
+                windows: native?.windows || [],
+                app: native?.app || null,
+                providerOnly: !native,
+                segments,
+            });
+            seen.add(daemonCard.id);
+        }
+
+        // During daemon startup or a missed D-Bus push, never make an otherwise
+        // healthy GNOME application disappear from the panel.
+        for (const native of nativeCards) {
+            if (!seen.has(native.id))
+                out.push(native);
+        }
+        return out;
+    }
+
+    _refresh(forcePublish = false) {
+        const nativeCards = this._nativeCards();
+        this._publishNative(nativeCards, forcePublish);
+
+        const cards = this._daemon.available
+            ? this._enrichCards(this._daemonCards, nativeCards)
+            : nativeCards;
         cards.sort((a, b) =>
             Number(b.focused) - Number(a.focused) ||
             attentionRank(b.attention) - attentionRank(a.attention) ||
             (a.name || a.id).localeCompare(b.name || b.id));
+        this._applyRenderConfig();
         this._render(cards);
+    }
+
+    _applyRenderConfig() {
+        const gap = Number(this._panelRender?.gap);
+        if (Number.isFinite(gap) && gap >= 0)
+            this._box.set_style(`spacing: ${Math.min(64, gap)}px;`);
+        else
+            this._box.set_style(null);
     }
 
     _render(cards) {
@@ -164,6 +261,9 @@ class ActivityStripIndicator extends PanelMenu.Button {
             }
         }
         for (const card of cards) {
+            // Icons are compositor-owned actors; create them only at render time
+            // so daemon snapshots never contain GObjects.
+            card.iconActor = card.app?.create_icon_texture?.(16) || null;
             let capsule = this._cards.get(card.id);
             if (!capsule) {
                 capsule = new AppCapsule(card, {
@@ -192,13 +292,13 @@ class ActivityStripIndicator extends PanelMenu.Button {
             return;
         }
         const target = (card.segments || []).find(segment => segment.active) || card.segments?.[0];
-        if (target)
+        if (target && !target.nativeWindow)
             this._daemon.activateView(card.id, target.id);
     }
 
     _activateSegment(card, segment) {
         if (segment.nativeWindow) {
-            const window = (card.windows || []).find(candidate => `window:${candidate.get_stable_sequence()}` === segment.id);
+            const window = (card.windows || []).find(candidate => windowID(candidate) === segment.id);
             if (window)
                 card.app?.activate_window(window, global.get_current_time());
             return;
@@ -292,6 +392,10 @@ class ActivityStripIndicator extends PanelMenu.Button {
         if (this._refreshSource) {
             GLib.source_remove(this._refreshSource);
             this._refreshSource = 0;
+        }
+        if (this._heartbeatSource) {
+            GLib.source_remove(this._heartbeatSource);
+            this._heartbeatSource = 0;
         }
         this._daemon?.destroy();
         this._daemon = null;

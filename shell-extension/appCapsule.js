@@ -9,6 +9,11 @@ function compactTitle(title) {
     return `${value.slice(0, 10)}…`;
 }
 
+function positiveInt(value, fallback) {
+    const number = Number(value);
+    return Number.isInteger(number) && number > 0 ? number : fallback;
+}
+
 export const AppCapsule = GObject.registerClass(
 class AppCapsule extends St.Button {
     _init(card, handlers = {}) {
@@ -65,12 +70,31 @@ class AppCapsule extends St.Button {
 
     update(card) {
         this._card = card;
+        const density = card.density || 'adaptive';
+        const compact = density === 'compact';
+        const micro = density === 'micro';
         this.toggle_style_class_name('focused', Boolean(card.focused));
         this.toggle_style_class_name('urgent', card.attention === 'urgent');
         this.toggle_style_class_name('attention', card.attention === 'attention');
+        this.toggle_style_class_name('density-compact', compact);
+        this.toggle_style_class_name('density-micro', micro);
+
+        const minWidth = positiveInt(card.minWidth, 64);
+        const preferredWidth = positiveInt(card.preferredWidth, 156);
+        const maxWidth = Math.max(preferredWidth, positiveInt(card.maxWidth, 240));
+        let widthRule = '';
+        if (density === 'full')
+            widthRule = `width: ${Math.min(maxWidth, preferredWidth)}px;`;
+        else if (compact)
+            widthRule = `width: ${Math.max(minWidth, Math.round((minWidth + preferredWidth) / 2))}px;`;
+        else if (micro)
+            widthRule = `width: ${minWidth}px;`;
+        this.set_style(`min-width: ${minWidth}px; max-width: ${maxWidth}px; ${widthRule}`);
+
         this._title.text = card.title || card.name || card.id;
+        this._title.visible = !micro;
         this._subtitle.text = card.subtitle || '';
-        this._subtitle.visible = Boolean(card.subtitle);
+        this._subtitle.visible = !compact && !micro && Boolean(card.subtitle);
         const count = card.surfaceCount > 0 ? card.surfaceCount : card.windowCount;
         this._badge.text = count > 1 ? String(count) : '';
         this._badge.visible = count > 1;
@@ -107,10 +131,10 @@ class AppCapsule extends St.Button {
         }
         if ((card.overflowCount || 0) > 0)
             this._segments.add_child(new St.Label({style_class: 'hws-segment-overflow', text: `+${card.overflowCount}`}));
-        this._segments.visible = this._segments.get_n_children() > 0;
+        this._segments.visible = !micro && this._segments.get_n_children() > 0;
 
         const progress = typeof card.progress === 'number' ? Math.max(0, Math.min(1, card.progress)) : null;
-        this._progressTrack.visible = progress !== null;
+        this._progressTrack.visible = !micro && progress !== null;
         if (progress !== null) {
             const width = Math.max(1, Math.round(100 * progress));
             this._progressFill.set_style(`width: ${width}%;`);
