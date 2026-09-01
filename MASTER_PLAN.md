@@ -2,32 +2,29 @@
 
 Единый living execution plan проекта HWS.
 
-Правило: если архитектурная находка, ограничение или новый риск меняет последовательность работ, сначала обновляется этот файл, затем код/документация.
+Правило: если архитектурная находка, ограничение или новый риск меняет последовательность работ, сначала обновляется этот файл, затем код/документация. Отмечать `[x]` разрешено только для реализованного и проверенного результата, а не для одной документации о будущем поведении.
 
 ## 0. Цель продукта
 
 Создать иерархическую рабочую оболочку для Ubuntu, которая организует работу вокруг контекстов и задач, а не вокруг списка приложений.
 
-Целевой пользовательский цикл:
-
 ```text
 Area → Context → Project → Task → Ready Workspace
 ```
 
-HWS должен уметь быстро навигировать по иерархии, восстанавливать рабочее окружение, управлять значимыми side effects через проверяемую модель состояния и оставаться безопасно отключаемым слоем поверх базовой графической системы.
+HWS должен быстро навигировать по иерархии, восстанавливать рабочее окружение, управлять значимыми side effects через проверяемую модель состояния и оставаться безопасно отключаемым слоем поверх базовой графической системы.
 
-## 1. Архитектурные решения, уже принятые
+## 1. Архитектурные решения
 
 - [x] Основной daemon пишется на Go.
 - [x] UI и durable orchestration разделены.
-- [x] Иерархия контекста имеет произвольную глубину.
+- [x] Иерархия имеет произвольную глубину.
 - [x] Axiom используется для значимых проверяемых переходов и orchestration.
 - [x] Эфемерное UI-состояние не проводится через Axiom.
 - [x] На первом этапе HWS не форкает compositor/window manager.
-- [x] Интеграции с ОС скрываются за адаптерами.
-- [x] Desired state и observed state рабочего окружения разделяются.
-- [x] Все системные side effects должны иметь идемпотентные границы или явное описание невозможности идемпотентности.
-- [x] Значимые архитектурные компромиссы фиксируются ADR.
+- [x] Интеграции с ОС скрываются за adapter boundaries.
+- [x] Desired state и observed state разделены.
+- [x] Внешние side effects проектируются как idempotent/recoverable; exactly-once не обещается.
 - [x] GNOME Shell extension является тонким UI/compositor adapter; тяжёлая логика живёт в `hwsd`.
 - [x] Shell ↔ `hwsd` используют versioned D-Bus boundary.
 - [x] Первый desktop target: Ubuntu 26.04 LTS / GNOME Shell 50 / Wayland.
@@ -35,184 +32,227 @@ HWS должен уметь быстро навигировать по иера�
 - [x] Desktop app launch/activation отделены от generic process launch.
 - [x] PID/title не считаются durable window identity.
 - [x] Layout domain использует logical/normalized coordinates.
-- [x] Monitor topology является versioned observed state и вызывает reconcile при изменении.
+- [x] Monitor topology рассматривается как versioned observed state.
+- [x] Значимые компромиссы фиксируются ADR.
 
-## 2. Definition of Done для MVP
+## 2. Текущее реализованное состояние
 
-MVP считается готовым только если один реальный workspace проходит полный цикл:
+На `main` реализован первый headless vertical slice:
 
-1. HWS запускается в пользовательской сессии Ubuntu 26.04 / GNOME 50 / Wayland.
+```text
+Hierarchy/domain
+      ↓
+Desired ↔ Observed diff
+      ↓
+Reconciler
+      ↓
+Fake Desktop adapter
+      ↓
+Axiom WorkspaceLifecycle
+      ↓
+Headless hwsctl demo
+```
+
+Фактически присутствуют:
+
+- Go module с минимальной версией Go 1.26;
+- закреплённый pseudo-version Axiom на commit `e6a7991b5010bd39875b8f7256850d462c2a0bc6`;
+- `go.sum` и воспроизводимый module graph;
+- stable ID types;
+- дерево произвольной глубины с cycle/missing-parent validation;
+- deterministic child ordering и path resolution;
+- desired/observed workspace state;
+- resource ownership `managed/adopted/external`;
+- normalized placement rectangles;
+- deterministic reconcile plan/evaluation;
+- desktop adapter interface;
+- deterministic fake adapter с failure injection;
+- reconciler `observe → diff → ensure → observe → evaluate`;
+- Axiom `HWSWorkspaceLifecycle` с typed activities;
+- operation-key based idempotency boundary;
+- headless CLI smoke path;
+- versioned IPC protocol primitives и D-Bus contract documentation;
+- CI: module graph, gofmt, unit tests, race, vet, CLI smoke.
+
+Ограничение: fake adapter доказывает domain/orchestration semantics, но **не** доказывает готовность GNOME integration.
+
+## 3. Definition of Done для MVP
+
+MVP считается готовым только если один реальный workspace проходит полный цикл в Ubuntu 26.04 / GNOME 50 / Wayland:
+
+1. HWS запускается в пользовательской графической сессии.
 2. `Super` открывает иерархическую сетку.
 3. Пользователь проходит минимум 3 уровня иерархии.
-4. Выбор task создаёт desired workspace state.
+4. Выбор task создаёт revisioned desired workspace state.
 5. Переход проходит через Axiom model/claims.
-6. HWS запускает минимум два разных ресурса (например editor + terminal).
-7. Desktop app запускается/активируется через корректную GNOME/Wayland semantics, а не только generic exec.
-8. HWS распознаёт уже запущенные ресурсы и не создаёт дубликаты без причины.
-9. HWS сопоставляет window через Shell/application semantics и подтверждает observed window state.
-10. HWS применяет layout либо возвращает объяснимую ошибку capability.
-11. Workspace можно закрыть и восстановить.
+6. HWS запускает минимум два разных ресурса.
+7. Desktop app запускается/активируется через GNOME/Wayland semantics, а не только generic exec.
+8. Уже существующие ресурсы распознаются без blind duplicate.
+9. Window association использует Shell/application semantics.
+10. Layout применяется относительно актуальной monitor topology либо возвращается объяснимая capability error.
+11. Workspace можно suspend/resume/close/recover согласно формальной semantics.
 12. История операции доступна для диагностики.
-13. После рестарта `hwsd` durable операция/состояние не становится неописанным.
-14. После disappearance/reappearance D-Bus owner Shell выполняет fresh handshake и snapshot.
-15. Extension переживает многократные enable/disable без signal/actor/source leaks.
-16. Отключение HWS не делает базовую графическую сессию неработоспособной.
+13. После рестарта `hwsd` durable operation/state остаются объяснимыми.
+14. После D-Bus owner change Shell делает fresh handshake и snapshot.
+15. Extension переживает многократные enable/disable без leaks.
+16. Отключение HWS не ломает базовую GNOME-сессию.
 
-## 3. Workstreams
+## 4. Workstreams
 
 ### W0 — Repository foundation
 
-- [ ] Определить лицензию.
-- [ ] Создать Go module.
-- [ ] Зафиксировать минимальную поддерживаемую версию Go.
-- [ ] Добавить Makefile/Taskfile.
-- [ ] Добавить CI: fmt, vet, test, race, vulnerability scan.
+- [ ] Определить лицензию и проверить совместимость с GNOME Extensions distribution.
+- [x] Создать Go module.
+- [x] Зафиксировать Go 1.26 как минимальную версию текущего прототипа.
+- [x] Добавить Makefile.
+- [x] Добавить CI: module graph, fmt, unit, race, vet, smoke.
+- [ ] Добавить vulnerability scan.
 - [ ] Добавить CONTRIBUTING.md.
-- [ ] Добавить SECURITY.md.
+- [ ] Добавить top-level SECURITY.md.
 - [x] Добавить ADR template.
-- [ ] Зафиксировать code ownership и правила ветвления.
+- [ ] Зафиксировать CODEOWNERS/branch protection policy.
 
-### W1 — Domain model
+### W1 — Domain hierarchy
 
-- [ ] Определить `NodeID`, `WorkspaceID`, `ResourceID`, `ActionID`.
-- [ ] Определить типы узлов: category/project/task/action/widget/query.
-- [ ] Реализовать дерево произвольной глубины.
-- [ ] Реализовать stable ordering.
-- [ ] Реализовать selection path.
-- [ ] Реализовать breadcrumbs/context stack.
-- [ ] Определить правила динамических children providers.
-- [ ] Определить snapshot/version модели дерева.
-- [ ] Покрыть property tests для дерева и path resolution.
+- [x] `NodeID`, `WorkspaceID`, `ResourceID`, `ActionID`.
+- [x] Типы узлов category/project/task/action/widget/query.
+- [x] Дерево произвольной глубины.
+- [x] Проверка duplicate IDs, missing parents и cycles.
+- [x] Stable deterministic ordering.
+- [x] Selection/path resolution.
+- [ ] Breadcrumb/context-stack service поверх path model.
+- [ ] Dynamic children provider rules.
+- [ ] Snapshot/revision дерева.
+- [ ] Property tests для дерева/path invariants.
 
-### W2 — Workspace state model
+### W2 — Workspace state / reconciliation
 
-- [x] Описать desired state на уровне архитектурного контракта.
-- [x] Описать observed state на уровне архитектурного контракта.
-- [x] Описать reconciliation result на уровне архитектурного контракта.
-- [x] Описать resource lifecycle на уровне архитектурного контракта.
-- [x] Определить partial/degraded states.
-- [x] Определить ownership ресурсов: managed/adopted/external.
-- [x] Определить правила закрытия workspace без убийства чужих процессов.
-- [ ] Реализовать deterministic diff desired ↔ observed.
-- [ ] Реализовать monitor topology revision semantics.
-- [ ] Реализовать window observation identity model.
+- [x] Реализовать desired state.
+- [x] Реализовать observed state.
+- [x] Реализовать resource ownership managed/adopted/external.
+- [x] Реализовать normalized placement intent.
+- [x] Реализовать deterministic desired ↔ observed diff.
+- [x] Реализовать reconcile evaluation required/optional resources.
+- [x] Реализовать partial/degraded classification.
+- [x] Close path не удаляет adopted/external ресурсы в fake adapter/reconciler semantics.
+- [ ] Разделить readiness на process/window/layout/focus sub-observations.
+- [ ] Реализовать monitor topology revision semantics, а не только поле в observed model.
+- [ ] Реализовать window identity/association model.
+- [ ] Определить compensation policy для non-idempotent actions.
 
 ### W3 — Axiom integration
 
-- [ ] Добавить зависимость `github.com/Homiakus/axiom` через отдельный integration package.
-- [ ] На ранней стадии закрепить конкретную совместимую версию/commit Axiom и обновлять осознанно.
-- [ ] Использовать declarative Go `model` как основной frontend.
-- [x] Описать model `WorkspaceLifecycle`.
-- [x] Описать events: Activate, Reconcile, Suspend, Resume, Close, Recover.
-- [x] Описать states: Inactive, Preparing, Active, Degraded, Suspending, Recovering, Failed.
-- [x] Описать claims для ownership, capability и safety.
-- [ ] Реализовать typed activities для OS side effects.
-- [ ] Разделить generic process activities и Shell desktop-app/window activities.
-- [ ] В production path использовать transactional durable store.
-- [ ] Зафиксировать idempotency keys для каждой activity.
-- [ ] Добавить failure injection tests.
-- [ ] Добавить replay/history tests.
-- [ ] Добавить explain diagnostics в UI/API.
+- [x] Добавить `github.com/Homiakus/axiom`.
+- [x] Закрепить конкретный pre-v1 commit через pseudo-version.
+- [x] Использовать declarative Go `model` frontend.
+- [x] Реализовать `HWSWorkspaceLifecycle` prototype.
+- [x] Реализовать Activate/Recover/Resume/Suspend/Close events.
+- [x] Реализовать states Inactive/Preparing/Active/Degraded/Recovering/Closing/Failed.
+- [x] Реализовать базовые count/identity claims.
+- [x] Реализовать typed fake-side-effect activities.
+- [x] Использовать operation key как activity idempotency boundary.
+- [x] Добавить lifecycle unit tests для activation и ownership-safe close.
+- [x] Добавить recovery/idempotent repeated-activation tests.
+- [ ] Уточнить formal Suspend semantics; текущий prototype не должен путать inactive и оставленные running resources.
+- [ ] Добавить ownership/capability claims непосредственно в lifecycle model там, где они действительно model-level.
+- [ ] Разделить generic process и Shell desktop/window activities.
+- [ ] Перевести production path на transactional durable store.
+- [ ] Добавить reopen/restart continuation tests.
+- [ ] Добавить history/replay compatibility tests.
+- [ ] Вывести `Run.Explain` в service/API.
 
 ### W4 — `hwsd`
 
-- [ ] Bootstrap daemon lifecycle.
-- [ ] Single-instance policy через D-Bus well-known name/service ownership.
+- [ ] Создать реальный `cmd/hwsd` daemon.
+- [ ] Single-instance policy через D-Bus well-known name.
 - [ ] Structured logging.
-- [ ] Health endpoint/IPC method.
+- [ ] Health/status method.
 - [ ] Config loader.
-- [ ] State storage abstraction.
-- [ ] Axiom engine lifecycle.
+- [ ] Durable state directory policy.
+- [ ] Axiom engine lifecycle в daemon.
 - [ ] Context service.
 - [ ] Workspace service.
-- [ ] Reconciler.
+- [x] Headless reconciler core реализован как application package.
 - [ ] Integration registry.
 - [ ] Graceful shutdown.
-- [ ] Crash recovery path.
-- [ ] systemd --user/D-Bus activation integration.
+- [ ] Crash recovery bootstrap.
+- [ ] systemd --user / D-Bus activation.
 - [ ] graphical-session lifecycle integration.
 
-### W5 — IPC contract
+### W5 — IPC / D-Bus
 
-- [x] Выбрать D-Bus как основной local session transport Shell ↔ `hwsd`.
-- [ ] Сформировать versioned API.
-- [ ] Handshake: protocol version + daemon instance + capabilities + revision epoch.
-- [ ] `GetTree`.
-- [ ] `SelectNode`.
-- [ ] `ActivateWorkspace`.
-- [ ] `GetWorkspaceState`.
-- [ ] `GetHistory`.
-- [ ] `Explain`.
-- [ ] `Search`.
-- [ ] event stream/subscriptions.
-- [ ] capability discovery.
-- [ ] daemon owner disappearance/reappearance semantics.
-- [ ] stale snapshot invalidation rules.
-- [ ] bounded timeout/cancellation rules.
-- [ ] contract tests.
+- [x] Выбрать session D-Bus как основной Shell ↔ `hwsd` transport.
+- [x] Зафиксировать `org.homiakus.HWS1`, object path и protocol v1 в контракте.
+- [x] Реализовать pure-Go protocol constants/Hello/cache identity/mutation request validation.
+- [x] Зафиксировать handshake: protocol + daemon instance + revision epoch + capabilities.
+- [x] Зафиксировать daemon owner change/stale-cache semantics.
+- [x] Зафиксировать operation key ≠ operation tracking ID.
+- [ ] Реализовать D-Bus server transport.
+- [ ] Реализовать `Hello`.
+- [ ] Реализовать `GetTree` / `GetPath`.
+- [ ] Реализовать `ActivateWorkspace` / `RecoverWorkspace` / `SuspendWorkspace` / `ResumeWorkspace` / `CloseWorkspace`.
+- [ ] Реализовать `GetWorkspace` / `GetOperation` / `GetCapabilities`.
+- [ ] Реализовать `Search`.
+- [ ] Реализовать signals/subscriptions.
+- [ ] Реализовать bounded payload limits.
+- [ ] Contract tests на реальном session bus.
 
-### W6 — Shell UI / GNOME 50 adapter
+### W6 — GNOME 50 Shell adapter/UI
 
+- [ ] Thin extension entry point.
+- [ ] Полностью reversible enable/disable ownership model.
+- [ ] D-Bus client/reconnect state machine.
 - [ ] Home/Grid mode.
 - [ ] Focus mode.
 - [ ] Dynamic row generation.
-- [ ] Keyboard navigation.
-- [ ] Touch/mouse navigation.
+- [ ] Keyboard/pointer/touch navigation.
 - [ ] Breadcrumbs.
 - [ ] Global search.
 - [ ] Loading/degraded/error states.
-- [ ] Accessibility model.
-- [ ] Accessible name/focus state for every interactive tile.
-- [ ] Animation budget.
-- [ ] Focus handling.
-- [ ] Multi-monitor behavior.
-- [ ] Thin entry point and process-isolated module structure.
-- [ ] Per-component ownership of signals/sources/cancellables/actors.
-- [ ] Full reversible `enable()`/`disable()`.
-- [ ] No synchronous filesystem/network/database work in Shell process.
-- [ ] D-Bus reconnect/handshake state machine.
-- [ ] Shell application launch/activation executor with user timestamp/context.
-- [ ] `Shell.WindowTracker`-based window/application association.
+- [ ] Accessibility names/focus states.
+- [ ] Animation/main-loop budget.
+- [ ] `Shell.WindowTracker` application association.
+- [ ] user-context desktop app launch/activation executor.
 - [ ] Meta.Window capability/geometry adapter.
-- [ ] monitor topology observer with revisions.
+- [ ] monitor topology observer.
+- [ ] Multi-monitor behavior.
 - [ ] `user` session mode only for initial releases.
+- [ ] No filesystem/network/database/Axiom work in Shell process.
 
 ### W7 — OS integration
 
-- [ ] Application discovery via desktop application semantics.
+- [ ] Desktop application discovery.
 - [ ] Generic process launch/adoption.
-- [ ] Desktop app launch/activation as separate path.
 - [ ] Terminal launch with cwd.
-- [ ] Window discovery.
-- [ ] Window observation model: appID/startupID/WM_CLASS/PID hints.
-- [ ] Window intent/layout adapter.
+- [ ] Desktop app launch/activation as separate path.
+- [ ] Window discovery/association.
 - [ ] Focus request + observed confirmation.
-- [ ] Logical/normalized geometry conversion.
-- [ ] systemd user services.
+- [ ] Logical/normalized → current topology geometry resolution.
 - [ ] filesystem/project discovery.
 - [ ] Git status provider.
-- [ ] SSH integration.
-- [ ] network/VPN capabilities только через безопасный adapter boundary.
-- [ ] portals/screen sharing compatibility checks.
+- [ ] SSH provider.
+- [ ] network/VPN capability boundary.
+- [ ] portals/screen-sharing compatibility.
 - [ ] Ubuntu default-extension compatibility scanner.
-- [ ] third-party extension conflict classification without silent disable.
+- [ ] third-party conflict classification without silent disable.
 
-### W8 — Persistence & recovery
+### W8 — Persistence / recovery
 
-- [ ] Durable Axiom store adapter/configuration.
-- [ ] User config schema.
+- [ ] Pebble-backed Axiom store configuration.
+- [ ] ProductionMode path with transactional store.
+- [ ] Durable workspace definition/config schema.
 - [ ] Context tree persistence.
 - [ ] Workspace snapshots.
-- [ ] Last active contexts.
-- [ ] Crash markers.
-- [ ] Recovery decision model.
-- [ ] Migration strategy.
+- [ ] Last active context.
+- [ ] Restart bootstrap: fresh observed state before recovery decision.
+- [ ] Crash-between-side-effect-and-checkpoint tests.
+- [ ] Store reopen/retry tests.
+- [ ] Migration/version policy.
 - [ ] Corruption handling.
-- [ ] backup/export format.
-- [ ] Never persist session-local Meta window identifiers as durable identity.
-- [ ] Fresh monitor/window observation after Shell or daemon restart.
+- [ ] backup/export.
+- [ ] Никогда не сохранять session-local Meta window ID как durable identity.
 
-### W9 — Search and discovery
+### W9 — Search/discovery
 
 - [ ] Prefix/fuzzy search.
 - [ ] Hierarchical result paths.
@@ -220,79 +260,76 @@ MVP считается готовым только если один реаль�
 - [ ] Project discovery providers.
 - [ ] Action search.
 - [ ] Capability-aware filtering.
-- [ ] Search performance budget.
-- [ ] Direct-jump results to reduce cognitive depth of deep hierarchy.
+- [ ] Direct-jump navigation.
+- [ ] Search performance baseline.
 
 ### W10 — Testing
 
-- [ ] Unit tests.
-- [ ] Property tests for hierarchy/reconciler.
-- [ ] Axiom model tests.
-- [ ] Integration contract tests.
-- [ ] Fake desktop/session adapter.
-- [ ] Golden tests for layouts/tree projections.
-- [ ] Race tests.
-- [ ] Fuzz tests for config/IPC/state transitions.
-- [ ] Mutation testing for critical pure Go packages.
-- [ ] Fault injection for activities and storage.
+- [x] Unit tests для текущего headless slice.
+- [x] Fake desktop adapter.
+- [x] Fake failure injection.
+- [x] Axiom lifecycle tests.
+- [x] Repeated reconcile/no-duplicate test.
+- [x] Ownership-safe close test.
+- [x] Race test в CI для текущего Go codebase.
+- [x] IPC protocol primitive tests.
+- [ ] Property tests hierarchy/reconciler.
+- [ ] Fuzz config/IPC/state transitions.
+- [ ] Mutation testing critical pure packages.
+- [ ] Durable activity/storage fault injection.
 - [ ] Restart/recovery tests.
-- [ ] GNOME 50 nested Wayland tests through mutter-devkit/gnome-shell test tooling.
+- [ ] Real D-Bus contract tests.
+- [ ] GNOME 50 nested Wayland tests.
 - [ ] 100x extension enable/disable lifecycle stress.
-- [ ] hwsd D-Bus owner restart tests.
-- [ ] window race fixtures: splash/modal/delayed/main-window/close-during-action.
-- [ ] focus matrix: click/mouse/sloppy/fullscreen/modal.
-- [ ] scale matrix: 100/125/150/200%.
-- [ ] multi-monitor mixed-scale and topology-change tests.
-- [ ] secondary-monitor-left-of-primary geometry test.
-- [ ] Ubuntu 26.04 default extensions compatibility profile.
-- [ ] known conflicting extension profile.
-- [ ] keyboard-only/high-contrast/large-text/accessibility checks.
+- [ ] hwsd owner restart tests.
+- [ ] splash/modal/delayed/main-window/close-during-action races.
+- [ ] focus-policy matrix.
+- [ ] scale 100/125/150/200% matrix.
+- [ ] mixed-scale/multi-monitor topology tests.
+- [ ] secondary-monitor-left-of-primary test.
+- [ ] Ubuntu default extensions compatibility profile.
+- [ ] keyboard-only/high-contrast/large-text checks.
 
 ### W11 — Observability
 
 - [ ] Structured event model.
-- [ ] Correlation ID: UI intent → Axiom execution → activities → Shell adapter action.
-- [ ] Latency metrics.
+- [ ] Correlation chain `intent → Axiom execution → activity → adapter`.
 - [ ] Reconcile timings.
 - [ ] Activity retry metrics.
-- [ ] Shell lifecycle/reconnect metrics without excessive Shell logging.
-- [ ] Explain panel.
+- [ ] D-Bus reconnect metrics.
+- [ ] Explain panel/API.
 - [ ] Diagnostics bundle.
 - [ ] `hwsctl doctor`.
-- [ ] Privacy/redaction policy.
+- [ ] Redaction policy implementation.
 
 ### W12 — Security
 
 - [x] Начальный threat model.
-- [x] Начальный privilege boundary document.
-- [x] No root daemon by default как invariant.
-- [ ] Explicit handling of privileged actions.
-- [x] Command execution policy: argv arrays, no implicit shell.
-- [ ] Environment sanitization.
-- [ ] Path traversal protections.
-- [ ] Symlink/race considerations.
-- [x] Secrets never stored in workspace definitions.
-- [ ] IPC peer/session validation.
+- [x] Начальный privilege boundary.
+- [x] No-root-by-default invariant.
+- [x] argv arrays / no implicit shell invariant.
+- [x] Secrets excluded from workspace definition invariant.
+- [ ] Environment sanitization implementation.
+- [ ] Path traversal/symlink race protections.
+- [ ] D-Bus peer/session validation.
 - [ ] plugin/provider trust model.
+- [ ] privileged action boundary, если вообще понадобится.
 - [ ] Lock-screen integration отсутствует по умолчанию.
 
-### W13 — Compatibility & release engineering
+### W13 — Compatibility / release engineering
 
-- [x] Зафиксировать Ubuntu 26.04 / GNOME 50 / Wayland как first-class target.
-- [ ] Создать `COMPATIBILITY_MATRIX.md`.
-- [ ] Зафиксировать Ubuntu default extension set для test profile.
-- [ ] Ввести known-conflicts database/rules.
-- [ ] Добавить GNOME porting-guide review checklist.
-- [ ] CI MAY тестировать next GNOME development version без product support claim.
-- [ ] Добавление GNOME major в supported metadata возможно только после qualification suite.
-- [ ] Release-candidate/canary stage перед desktop production release.
-- [ ] Safe mode / disable path до первой публичной alpha.
+- [x] Ubuntu 26.04 / GNOME 50 / Wayland first-class target.
+- [ ] `COMPATIBILITY_MATRIX.md`.
+- [ ] Ubuntu default extension test profile.
+- [ ] known-conflicts database.
+- [ ] GNOME porting-guide review checklist.
+- [ ] qualification gate перед добавлением нового GNOME major в metadata.
+- [ ] RC/canary stage.
+- [ ] Safe mode / emergency disable path.
 
-## 4. Первый vertical slice
+## 5. VS-1 — Local Development Workspace
 
-### VS-1: Local Development Workspace
-
-Иерархия:
+Target hierarchy:
 
 ```text
 DEV
@@ -301,177 +338,170 @@ DEV
         └── Develop
 ```
 
-Ресурсы:
+Target resources:
 
 - editor как desktop application;
 - terminal в repo cwd;
-- optional browser/documentation window.
+- optional documentation/browser window.
 
-Axiom lifecycle:
+### Уже доказано headless tests
 
-```text
-Inactive
-  → Preparing
-  → Active
-  → Suspending
-  → Inactive
-```
+- [x] desired state валидируется;
+- [x] repeated reconcile не вызывает лишний Ensure для уже reached resource;
+- [x] repeated activation не должна дублировать resource ensures;
+- [x] partial required-resource failure классифицируется как Degraded;
+- [x] explicit Recover повторно reconciles и может вернуть workspace в Active;
+- [x] Close удаляет только managed resources;
+- [x] Axiom lifecycle реально компилируется/исполняется на Go 1.26;
+- [x] CLI smoke достигает `workspace=local-dev status=active required=2/2` на fake adapter.
 
-Error branches:
+### Ещё не доказано на настоящем desktop
 
-```text
-Preparing → Degraded
-Preparing → Failed
-Active → Degraded
-Degraded → Recovering → Active
-```
-
-Desktop activation sequence:
-
-```text
-Desired resource
-→ ensure/activate desktop app
-→ await matching window
-→ resolve monitor/workspace against current topology
-→ place window
-→ request focus if policy requires
-→ observe result
-→ report reached/degraded/failed
-```
-
-Acceptance tests:
-
-- [ ] repeated Activate не создаёт лишние процессы;
-- [ ] activity retry не запускает неидемпотентный side effect повторно без key;
-- [ ] missing capability приводит к Degraded/Failed согласно policy;
-- [ ] crash `hwsd` между activities обнаруживается после restart;
-- [ ] Explain сообщает, какая activity/claim остановила переход;
-- [ ] Close не завершает adopted/external resource без явного ownership;
-- [ ] already-running editor корректно adopt/activate без blind duplicate;
+- [ ] already-running editor корректно adopt/activate;
 - [ ] PID/title mismatch не ломает window matching;
 - [ ] focus denial не маскируется как success;
+- [ ] fractional scaling/layout корректны;
 - [ ] monitor topology change во время activation вызывает re-resolution;
-- [ ] daemon restart не заставляет extension использовать stale snapshot.
+- [ ] daemon restart не оставляет stale Shell snapshot;
+- [ ] crash между внешним effect и durable checkpoint корректно восстанавливается;
+- [ ] `Explain` показывает причину остановки transition.
 
-## 5. Performance budgets — начальные цели
+## 6. Performance budgets
 
-Это проектные цели, а не измеренные характеристики.
+Пока это target, не измеренный baseline:
 
-- Grid navigation, локальный cached path: p95 < 16 ms до обновления UI state.
-- Поиск по локальному индексу: p95 < 50 ms для типичного пользовательского дерева.
-- IPC read query: p95 < 20 ms без внешних providers.
-- Активация workspace не должна блокировать UI thread.
-- Shell process не выполняет synchronous disk/network/database I/O в interaction path.
-- Event storms от window/monitor signals должны coalesce до bounded update rate.
-- Долгие activities отображаются как асинхронный progress/state.
-- Idle `hwsd` должен избегать polling loops там, где доступны события/watchers.
+- Grid cached navigation p95 < 16 ms.
+- Local search p95 < 50 ms.
+- IPC local read p95 < 20 ms без внешних providers.
+- Workspace activation не блокирует Shell main loop.
+- Shell не выполняет synchronous filesystem/network/database I/O.
+- Window/monitor event storms coalesce до bounded update rate.
+- Idle `hwsd` избегает polling там, где есть events/watchers.
 
-После появления прототипа цели заменяются измеренными baseline.
+После появления GNOME prototype эти цели заменяются измеренными baseline/threshold.
 
-## 6. Architectural guardrails
+## 7. Architectural guardrails
 
-Запрещено без ADR:
+Без ADR запрещено:
 
-- переносить эфемерное UI-состояние в durable Axiom execution;
-- давать UI прямой доступ к system side effects в обход `hwsd` intent/orchestration boundary;
-- превращать GNOME extension в основной business/infrastructure process;
-- выполнять синхронный filesystem/network/database I/O в Shell hot path;
-- выполнять произвольные shell-строки из workspace config;
-- связывать domain model напрямую с GNOME-specific типами;
-- строить GNOME 50 path на X11-only tooling;
-- считать PID/title durable identity окна;
-- считать успешный launch доказательством window/focus/layout success;
-- вручную распространять monitor scale multiplication в domain/layout logic;
-- считать успешным desired state без проверки observed state для критичных ресурсов;
-- replay absolute window rectangles после topology change без re-resolution;
-- удалять/убивать неуправляемые ресурсы ради «синхронизации»;
-- использовать process-local lock как гарантию межпроцессной эксклюзивности;
-- обещать exactly-once внешний side effect;
-- скрывать partial failure под общим статусом `Active`;
-- молча отключать чужие GNOME extensions;
-- заявлять поддержку GNOME major до qualification tests;
-- включать lock-screen session mode без отдельного ADR/security review;
-- добавлять AI-автоорганизацию, способную молча менять пользовательскую иерархию.
+- переносить hover/focus/animation в durable Axiom execution;
+- выполнять system side effects напрямую из UI в обход intent/orchestration boundary;
+- превращать GNOME extension в основной business process;
+- делать sync filesystem/network/database I/O в Shell hot path;
+- выполнять arbitrary shell strings из workspace config;
+- импортировать GNOME-specific types в domain;
+- строить GNOME 50 integration на X11-only tooling;
+- использовать PID/title как durable window identity;
+- считать launch доказательством window/focus/layout success;
+- вручную размножать scale-factor math по domain code;
+- объявлять Active без observed confirmation required resources;
+- replay absolute rectangles после topology change без re-resolution;
+- закрывать adopted/external resources как managed;
+- использовать process-local lock как межпроцессную гарантию;
+- обещать exactly-once внешний effect;
+- скрывать partial failure под Active;
+- молча отключать чужие extensions;
+- заявлять GNOME major support до qualification suite;
+- включать lock-screen mode без ADR/security review;
+- позволять automation/AI молча менять canonical user hierarchy.
 
-## 7. Milestones
+## 8. Milestones
 
-### M0 — Architecture bootstrap
+### M0 — Architecture bootstrap — DONE
 
 - [x] базовая документация;
 - [x] ADR foundation;
 - [x] domain contracts;
 - [x] Axiom boundary;
-- [x] GNOME developer failure-mode research;
+- [x] GNOME failure-mode research;
 - [x] GNOME 50 adapter contract;
-- [ ] skeleton Go module.
+- [x] Go module/package skeleton;
+- [x] baseline CI.
 
-### M1 — Headless prototype
+### M1 — Headless prototype — FUNCTIONAL
 
-- дерево;
-- workspace model;
-- Axiom lifecycle;
-- fake integrations;
-- CLI demo.
+- [x] hierarchy;
+- [x] workspace model;
+- [x] deterministic reconcile;
+- [x] fake desktop integration;
+- [x] Axiom lifecycle;
+- [x] CLI demo;
+- [x] unit/race/vet baseline;
+- [ ] durable restart/reopen proof — переносится в M1.5 перед real desktop mutation.
 
-### M2 — Desktop vertical slice
+### M1.5 — Durable orchestration gate
 
-- thin Shell UI;
-- versioned D-Bus;
-- GNOME 50 app/window adapter;
-- nested Wayland CI;
-- VS-1 end-to-end.
+Этот milestone обязателен **до** подключения реального управления окнами.
 
-### M3 — Durable/recovery
+- [ ] Pebble transactional store;
+- [ ] `WithProductionMode`;
+- [ ] restart/reopen test;
+- [ ] crash-after-effect/before-checkpoint scenario;
+- [ ] history/replay test;
+- [ ] Explain service;
+- [ ] Axiom pinned-version compatibility test.
 
-- production durable store;
-- restart recovery;
-- daemon owner reconnect;
-- diagnostics/history/explain.
+### M2 — Local daemon / D-Bus
+
+- [ ] `hwsd`;
+- [ ] D-Bus well-known name + Hello;
+- [ ] workspace mutations and snapshots;
+- [ ] operation tracking/signals;
+- [ ] systemd user activation;
+- [ ] owner restart/reconnect tests.
+
+### M3 — Desktop vertical slice
+
+- [ ] thin GNOME 50 extension;
+- [ ] app/window observation/activation adapter;
+- [ ] normalized layout against live topology;
+- [ ] nested Wayland CI;
+- [ ] VS-1 real desktop end-to-end.
 
 ### M4 — Productization
 
-- packaging;
-- installer/uninstaller/safe mode;
-- compatibility matrix;
-- Ubuntu default-extension test profile;
-- CI integration tests;
-- accessibility;
-- performance baselines.
+- [ ] packaging/install/uninstall/safe mode;
+- [ ] compatibility matrix;
+- [ ] Ubuntu default-extension profile;
+- [ ] accessibility;
+- [ ] performance baselines;
+- [ ] security hardening.
 
 ### M5 — Extensibility
 
-- providers/plugins;
-- dynamic nodes;
-- sync/export;
-- optional recommendation layer.
+- [ ] providers/plugins;
+- [ ] dynamic nodes;
+- [ ] sync/export;
+- [ ] optional recommendation layer.
 
-## 8. Current next actions
+## 9. Current next actions
 
-1. Создать Go module и package skeleton.
-2. Реализовать pure Go hierarchy/domain types из `DOMAIN_MODEL.md`.
-3. Реализовать deterministic desired ↔ observed diff.
-4. Подключить pinned Axiom и реализовать первую `WorkspaceLifecycle` model с fake activities.
-5. Создать versioned D-Bus `IPC_CONTRACT.md` до написания Shell client.
-6. Создать fake GNOME adapter и failure/race fixtures.
-7. Реализовать минимальный GNOME 50 extension только после прохождения headless tests.
-8. Поднять nested GNOME 50 test harness и 100x lifecycle test до подключения сложного tiling UI.
-9. Реализовать safe disable/doctor path до активного window mutation MVP.
+1. Зафиксировать final green CI после расширенных lifecycle/IPC tests и module graph lock.
+2. Добавить durable Pebble Axiom engine path и restart/reopen tests.
+3. Добавить history/replay/Explain contract tests для закреплённого Axiom commit.
+4. Создать `cmd/hwsd` и real session D-Bus server без GNOME-specific логики.
+5. Реализовать Hello/revision epoch/owner-restart semantics.
+6. Реализовать workspace mutation/read operations поверх существующего lifecycle.
+7. Только после durable + D-Bus tests создать минимальный GNOME 50 extension.
+8. Поднять nested GNOME 50 / Wayland lifecycle harness до сложного tiling UI.
+9. Добавить safe disable/doctor path до активного window mutation MVP.
 
-## 9. Change discipline
+## 10. Change discipline
 
-Каждая завершённая итерация должна:
+Каждая итерация должна:
 
-1. синхронизировать этот план с реальным состоянием;
+1. синхронизировать этот plan с кодом;
 2. иметь тестируемый результат;
-3. не объявлять неподтверждённые возможности реализованными;
-4. фиксировать новые архитектурные ограничения;
-5. по возможности оставлять `main` в собираемом и проверяемом состоянии.
+3. не выдавать proposed capability за implemented;
+4. фиксировать обнаруженные ограничения;
+5. оставлять `main` собираемым/проверяемым либо явно фиксировать известный CI blocker до его устранения.
 
-## 10. Research inputs
+## 11. Research inputs
 
-Архитектурные решения после анализа реальных GNOME проектов и официальных guidance зафиксированы в:
-
-- [`docs/DEVELOPER_PRACTICES_AND_FAILURE_MODES.md`](docs/DEVELOPER_PRACTICES_AND_FAILURE_MODES.md);
-- [`docs/GNOME_ADAPTER.md`](docs/GNOME_ADAPTER.md);
-- [`docs/adr/0004-thin-shell-dbus-boundary.md`](docs/adr/0004-thin-shell-dbus-boundary.md);
-- [`docs/adr/0005-ubuntu-2604-gnome50-wayland-target.md`](docs/adr/0005-ubuntu-2604-gnome50-wayland-target.md).
+- [`docs/DEVELOPER_PRACTICES_AND_FAILURE_MODES.md`](docs/DEVELOPER_PRACTICES_AND_FAILURE_MODES.md)
+- [`docs/GNOME_ADAPTER.md`](docs/GNOME_ADAPTER.md)
+- [`docs/AXIOM_INTEGRATION.md`](docs/AXIOM_INTEGRATION.md)
+- [`docs/IPC_CONTRACT.md`](docs/IPC_CONTRACT.md)
+- [`docs/INVARIANTS.md`](docs/INVARIANTS.md)
+- [`docs/adr/0004-thin-shell-dbus-boundary.md`](docs/adr/0004-thin-shell-dbus-boundary.md)
+- [`docs/adr/0005-ubuntu-2604-gnome50-wayland-target.md`](docs/adr/0005-ubuntu-2604-gnome50-wayland-target.md)
