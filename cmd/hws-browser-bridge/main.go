@@ -4,21 +4,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Homiakus/HWS/internal/providers/nativeframe"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/Homiakus/HWS/internal/providers/nativeframe"
+	"github.com/Homiakus/HWS/internal/providers/wire"
 )
 
-type envelope struct {
-	Schema     uint32          `json:"schema"`
-	Type       string          `json:"type"`
-	Source     string          `json:"source"`
-	ReceivedAt time.Time       `json:"receivedAt"`
-	Payload    json.RawMessage `json:"payload"`
-}
 type ack struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
@@ -43,7 +38,7 @@ func run(in io.Reader, out io.Writer) error {
 			_ = nativeframe.Write(out, mustJSON(ack{Error: "invalid json"}))
 			continue
 		}
-		e := envelope{Schema: 1, Type: "browser.snapshot", Source: "native-messaging", ReceivedAt: time.Now().UTC(), Payload: append([]byte(nil), p...)}
+		e := wire.Envelope{Schema: wire.SchemaVersion, Type: "browser.snapshot", Source: "native-messaging", ReceivedAt: time.Now().UTC(), Payload: append([]byte(nil), p...)}
 		if err := forward(e); err != nil {
 			_ = nativeframe.Write(out, mustJSON(ack{Error: err.Error()}))
 			continue
@@ -53,7 +48,7 @@ func run(in io.Reader, out io.Writer) error {
 		}
 	}
 }
-func forward(e envelope) error {
+func forward(e wire.Envelope) error {
 	path := os.Getenv("HWS_PROVIDER_SOCKET")
 	if path == "" {
 		runtime := os.Getenv("XDG_RUNTIME_DIR")
@@ -68,7 +63,6 @@ func forward(e envelope) error {
 	}
 	defer c.Close()
 	_ = c.SetWriteDeadline(time.Now().Add(time.Second))
-	enc := json.NewEncoder(c)
-	return enc.Encode(e)
+	return json.NewEncoder(c).Encode(e)
 }
 func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }
