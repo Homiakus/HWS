@@ -15,6 +15,7 @@ import (
 	"github.com/Homiakus/HWS/internal/panel"
 	"github.com/Homiakus/HWS/internal/panel/dsl"
 	"github.com/Homiakus/HWS/internal/providers"
+	"github.com/Homiakus/HWS/internal/providers/gnomeshell"
 	providerserver "github.com/Homiakus/HWS/internal/providers/server"
 	"github.com/Homiakus/HWS/internal/surface"
 )
@@ -101,23 +102,37 @@ func (h *Hub) Ingest(snapshot providers.Snapshot) error {
 	return h.Refresh()
 }
 
+// ReplaceShellSnapshotJSON atomically replaces the complete native GNOME Shell
+// observation. Rich providers are then merged on top by the normal registry
+// projection, making hwsd the canonical ApplicationSurface aggregator.
+func (h *Hub) ReplaceShellSnapshotJSON(payload string) error {
+	snapshot, err := gnomeshell.Decode([]byte(payload))
+	if err != nil {
+		return err
+	}
+	if err := h.registry.ReplaceProvider(gnomeshell.ProviderID, snapshot.ProviderSnapshots()); err != nil {
+		return err
+	}
+	return h.Refresh()
+}
+
 func (h *Hub) Refresh() error {
 	now := h.now()
-	rich := h.registry.Apply(nil, now)
+	aggregated := h.registry.Apply(nil, now)
+	health := h.registry.Health(now)
 
 	h.mu.Lock()
 	previous := h.surfaceSnapshot.Clone()
 	h.mu.Unlock()
 
-	next, err := surface.NewSnapshot(previous, rich, nil)
+	next, err := surface.NewSnapshot(previous, aggregated, health)
 	if err != nil {
 		return err
 	}
 
 	spec, specRevision, valid := h.manager.Current()
-	maxSegments := 4
-	if valid {
-		maxSegments = maxVisibleSegments(spec)
+	if !valid {
+		spec = panel.DefaultSpec("runtime")
 	}
 
 	h.mu.Lock()
@@ -128,7 +143,7 @@ func (h *Hub) Refresh() error {
 	if surfaceChanged || specChanged || h.panelRevision == 0 {
 		h.panelRevision++
 	}
-	h.panelSnapshot = panel.Project(next.Surfaces, maxSegments, h.panelRevision, now)
+	h.panelSnapshot = panel.ProjectWithSpec(next.Surfaces, spec, h.panelRevision, now)
 	panelRevision := h.panelRevision
 	notify := h.onPanelChanged
 	h.mu.Unlock()
@@ -137,15 +152,6 @@ func (h *Hub) Refresh() error {
 		notify(panelRevision)
 	}
 	return nil
-}
-
-func maxVisibleSegments(spec panel.Spec) int {
-	for _, group := range spec.Groups {
-		if group.App != nil {
-			return group.App.Surfaces.MaxVisible
-		}
-	}
-	return 4
 }
 
 func (h *Hub) Configure(path string) error {
@@ -270,6 +276,57 @@ func (h *Hub) SpecJSON() (string, error) {
 		Valid    bool       `json:"valid"`
 		Spec     panel.Spec `json:"spec"`
 	}{Revision: revision, Valid: valid, Spec: spec}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func (h *Hub) HealthJSON() (string, error) {
+	_, _, configValid := h.manager.Current()
+	var configError string
+	if err := h.manager.LastError(); err != nil {
+		configError = err.Error()
+	}
+
+	h.mu.RLock()
+	snapshot := h.surfaceSnapshot.Clone()
+	panelRevision := h.panelRevision
+	configRevision := h.configRevision
+	h.mu.RUnlock()
+
+	windowCount := 0
+	viewCount := 0
+	for _, app := range snapshot.Surfaces {
+		windowCount += app.WindowCount()
+		viewCount += app.ViewCount()
+	}
+	payload := struct {
+		Status          string                   `json:"status"`
+		SurfaceRevision string                   `json:"surfaceRevision"`
+		Generation      uint64                   `json:"generation"`
+		PanelRevision   uint64                   `json:"panelRevision"`
+		ConfigRevision  uint64                   `json:"configRevision"`
+		ConfigValid     bool                     `json:"configValid"`
+		ConfigError     string                   `json:"configError,omitempty"`
+		Applications    int                      `json:"applications"`
+		Windows         int                      `json:"windows"`
+		Views           int                      `json:"views"`
+		Providers       []surface.ProviderHealth `json:"providers"`
+	}{
+		Status:          "ok",
+		SurfaceRevision: snapshot.Revision,
+		Generation:      snapshot.Generation,
+		PanelRevision:   panelRevision,
+		ConfigRevision:  configRevision,
+		ConfigValid:     configValid,
+		ConfigError:     configError,
+		Applications:    len(snapshot.Surfaces),
+		Windows:         windowCount,
+		Views:           viewCount,
+		Providers:       snapshot.Providers,
+	}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return "", err

@@ -58,3 +58,57 @@ func TestRegistrySkipsStaleAndRejectsRevisionRollback(t *testing.T) {
 		t.Fatal("expected revision rollback error")
 	}
 }
+
+func TestReplaceProviderIsAtomicAndRemovesMissingApplications(t *testing.T) {
+	now := time.Unix(100, 0)
+	r := NewRegistry()
+	initial := []Snapshot{
+		{ProviderID: "gnome-shell", Kind: SourceNative, AppID: "a.desktop", AllowOrphan: true, ObservedAt: now, Revision: 2},
+		{ProviderID: "gnome-shell", Kind: SourceNative, AppID: "b.desktop", AllowOrphan: true, ObservedAt: now, Revision: 2},
+	}
+	if err := r.ReplaceProvider("gnome-shell", initial); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ReplaceProvider("gnome-shell", []Snapshot{{
+		ProviderID: "gnome-shell", Kind: SourceNative, AppID: "a.desktop", AllowOrphan: true, ObservedAt: now.Add(time.Second), Revision: 3,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	out := r.Apply(nil, now.Add(time.Second))
+	if len(out) != 1 || out[0].AppID != "a.desktop" {
+		t.Fatalf("provider replacement left stale applications: %#v", out)
+	}
+
+	if err := r.ReplaceProvider("gnome-shell", []Snapshot{{
+		ProviderID: "gnome-shell", Kind: SourceNative, AppID: "a.desktop", AllowOrphan: true, ObservedAt: now.Add(2 * time.Second), Revision: 1,
+	}}); err == nil {
+		t.Fatal("stale replacement unexpectedly accepted")
+	}
+	out = r.Apply(nil, now.Add(time.Second))
+	if len(out) != 1 || out[0].SourceRevision["gnome-shell"] != 3 {
+		t.Fatal("failed replacement mutated registry")
+	}
+}
+
+func TestProviderHealthDistinguishesFreshStaleAndPartial(t *testing.T) {
+	now := time.Unix(100, 0)
+	r := NewRegistry()
+	if err := r.Ingest(Snapshot{
+		ProviderID: "provider", Kind: SourceSystem, AppID: "fresh", ObservedAt: now, TTL: time.Minute, Revision: 4,
+		Capabilities: []surface.Capability{surface.CapabilityMediaObserve},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Ingest(Snapshot{
+		ProviderID: "provider", Kind: SourceSystem, AppID: "stale", ObservedAt: now.Add(-time.Minute), TTL: time.Second, Revision: 2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	health := r.Health(now)
+	if len(health) != 1 || !health[0].Connected || !health[0].Partial || health[0].Stale {
+		t.Fatalf("unexpected health: %#v", health)
+	}
+	if health[0].Revision != 4 || len(health[0].Capabilities) != 1 {
+		t.Fatalf("health aggregation incomplete: %#v", health[0])
+	}
+}

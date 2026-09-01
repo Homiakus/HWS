@@ -16,7 +16,9 @@ import (
 type Backend interface {
 	PanelJSON() (string, error)
 	SpecJSON() (string, error)
+	HealthJSON() (string, error)
 	ApplicationJSON(string) (string, error)
+	ReplaceShellSnapshotJSON(string) error
 	ReloadPanel() error
 	ActivateView(string, string) error
 	CloseView(string, string) error
@@ -48,9 +50,11 @@ func (s *Service) Hello(clientProtocol uint32, clientInstance string) (uint32, s
 		return 0, "", "", "", dbus.NewError(ipc.InterfaceName+".InvalidClient", []any{"client instance is required"})
 	}
 	capabilities, _ := json.Marshal(map[string]string{
+		"health":              "supported",
 		"panel.snapshot":      "supported",
 		"panel.spec":          "supported",
 		"panel.reload":        "supported",
+		"shell.snapshot.push": "supported",
 		"surface.application": "supported",
 		"view.activate":       "supported",
 		"view.close":          "supported",
@@ -68,9 +72,18 @@ func (s *Service) GetPanelSpec() (string, *dbus.Error) {
 	return value, asDBusError(err)
 }
 
+func (s *Service) GetHealth() (string, *dbus.Error) {
+	value, err := s.backend.HealthJSON()
+	return value, asDBusError(err)
+}
+
 func (s *Service) GetApplicationSurface(appID string) (string, *dbus.Error) {
 	value, err := s.backend.ApplicationJSON(appID)
 	return value, asDBusError(err)
+}
+
+func (s *Service) SubmitShellSnapshot(payload string) *dbus.Error {
+	return asDBusError(s.backend.ReplaceShellSnapshotJSON(payload))
 }
 
 func (s *Service) ReloadPanel() (bool, string, *dbus.Error) {
@@ -176,7 +189,9 @@ func introspectionNode() *introspect.Node {
 					{Name: "Hello", Args: []introspect.Arg{{Name: "clientProtocol", Type: "u", Direction: "in"}, {Name: "clientInstance", Type: "s", Direction: "in"}, {Name: "serverProtocol", Type: "u", Direction: "out"}, {Name: "serverInstance", Type: "s", Direction: "out"}, {Name: "revisionEpoch", Type: "s", Direction: "out"}, {Name: "capabilities", Type: "s", Direction: "out"}}},
 					{Name: "GetPanelSnapshot", Args: []introspect.Arg{{Name: "json", Type: "s", Direction: "out"}}},
 					{Name: "GetPanelSpec", Args: []introspect.Arg{{Name: "json", Type: "s", Direction: "out"}}},
+					{Name: "GetHealth", Args: []introspect.Arg{{Name: "json", Type: "s", Direction: "out"}}},
 					{Name: "GetApplicationSurface", Args: []introspect.Arg{{Name: "appId", Type: "s", Direction: "in"}, {Name: "json", Type: "s", Direction: "out"}}},
+					{Name: "SubmitShellSnapshot", Args: []introspect.Arg{{Name: "json", Type: "s", Direction: "in"}}},
 					{Name: "ReloadPanel", Args: []introspect.Arg{{Name: "ok", Type: "b", Direction: "out"}, {Name: "diagnostic", Type: "s", Direction: "out"}}},
 					{Name: "ActivateView", Args: []introspect.Arg{{Name: "appId", Type: "s", Direction: "in"}, {Name: "viewId", Type: "s", Direction: "in"}}},
 					{Name: "CloseView", Args: []introspect.Arg{{Name: "appId", Type: "s", Direction: "in"}, {Name: "viewId", Type: "s", Direction: "in"}}},

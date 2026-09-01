@@ -8,18 +8,25 @@ import (
 )
 
 type fakeBackend struct {
-	panel string
-	spec  string
-	app   string
-	err   error
+	panel         string
+	spec          string
+	health        string
+	app           string
+	shellSnapshot string
+	err           error
 }
 
 func (f *fakeBackend) PanelJSON() (string, error)             { return f.panel, f.err }
 func (f *fakeBackend) SpecJSON() (string, error)              { return f.spec, f.err }
+func (f *fakeBackend) HealthJSON() (string, error)            { return f.health, f.err }
 func (f *fakeBackend) ApplicationJSON(string) (string, error) { return f.app, f.err }
-func (f *fakeBackend) ReloadPanel() error                     { return f.err }
-func (f *fakeBackend) ActivateView(string, string) error      { return f.err }
-func (f *fakeBackend) CloseView(string, string) error         { return f.err }
+func (f *fakeBackend) ReplaceShellSnapshotJSON(value string) error {
+	f.shellSnapshot = value
+	return f.err
+}
+func (f *fakeBackend) ReloadPanel() error                { return f.err }
+func (f *fakeBackend) ActivateView(string, string) error { return f.err }
+func (f *fakeBackend) CloseView(string, string) error    { return f.err }
 
 func TestHelloNegotiatesProtocol(t *testing.T) {
 	s := NewService(&fakeBackend{})
@@ -43,5 +50,17 @@ func TestServicePreservesReloadDiagnostics(t *testing.T) {
 	}
 	if ok || diagnostic != "bad panel" {
 		t.Fatalf("unexpected reload result: ok=%v diagnostic=%q", ok, diagnostic)
+	}
+}
+
+func TestServiceAcceptsShellSnapshot(t *testing.T) {
+	backend := &fakeBackend{}
+	s := NewService(backend)
+	const payload = `{"schema":1}`
+	if err := s.SubmitShellSnapshot(payload); err != nil {
+		t.Fatal(err)
+	}
+	if backend.shellSnapshot != payload {
+		t.Fatalf("snapshot=%q", backend.shellSnapshot)
 	}
 }
