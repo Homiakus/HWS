@@ -64,10 +64,12 @@ type LauncherEntry struct {
 	Progress *float64
 	Count    *int64
 	Urgent   bool
+	Updating bool
 	Revision uint64
 }
 
 func FromLauncherEntry(x LauncherEntry, now time.Time) providers.Snapshot {
+	run := surface.LifecycleRunning
 	att := surface.AttentionNormal
 	if x.Urgent {
 		att = surface.AttentionUrgent
@@ -75,11 +77,18 @@ func FromLauncherEntry(x LauncherEntry, now time.Time) providers.Snapshot {
 	activity := surface.ActivityIdle
 	if x.Progress != nil {
 		activity = surface.ActivityProgress
+	} else if x.Updating {
+		activity = surface.ActivityWorking
 	}
 	var badge *string
 	if x.Count != nil {
 		s := fmt.Sprintf("%d", *x.Count)
 		badge = &s
 	}
-	return providers.Snapshot{ProviderID: "launcher-entry", Kind: providers.SourceSystem, AppID: x.AppID, ObservedAt: now, TTL: 15 * time.Second, Priority: 20, Revision: x.Revision, Confidence: surface.ConfidenceMedium, Status: surface.StatusPatch{Attention: &att, Activity: &activity, Progress: x.Progress, Badge: badge}}
+	var summary *string
+	if x.Updating {
+		value := "Updating"
+		summary = &value
+	}
+	return providers.Snapshot{ProviderID: "launcher-entry", Kind: providers.SourceSystem, AppID: x.AppID, ObservedAt: now, TTL: 30 * time.Second, Priority: 20, Revision: x.Revision, Confidence: surface.ConfidenceMedium, Status: surface.StatusPatch{Lifecycle: &run, Attention: &att, Activity: &activity, Progress: x.Progress, Badge: badge, Summary: summary}}
 }

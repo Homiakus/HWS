@@ -14,6 +14,7 @@ import (
 	"github.com/Homiakus/HWS/internal/daemon"
 	"github.com/Homiakus/HWS/internal/dbusapi"
 	"github.com/Homiakus/HWS/internal/providers"
+	"github.com/Homiakus/HWS/internal/providers/launcherentry"
 	"github.com/Homiakus/HWS/internal/providers/mpris"
 	providerserver "github.com/Homiakus/HWS/internal/providers/server"
 )
@@ -66,6 +67,16 @@ func run() error {
 		defer mprisCollector.Close()
 		go mprisCollector.Run(ctx, 2*time.Second, func(err error) {
 			log.Printf("MPRIS collector: %v", err)
+		})
+	}
+
+	launcherCollector, err := launcherentry.OpenSession(hub)
+	if err != nil {
+		log.Printf("LauncherEntry collector unavailable: %v", err)
+	} else {
+		defer launcherCollector.Close()
+		go launcherCollector.Run(ctx, func(err error) {
+			log.Printf("LauncherEntry collector: %v", err)
 		})
 	}
 
