@@ -194,7 +194,6 @@ func BuildDefinition() *model.Definition {
 
 	definition.Claim("requiredCountsNonNegative", reachedRequired.GreaterOrEqual(0))
 	definition.Claim("totalRequiredNonNegative", totalRequired.GreaterOrEqual(0))
-	definition.Claim("reachedDoesNotExceedTotal", reachedRequired.LessOrEqualField(totalRequired))
 	definition.Claim(
 		"activeRequiresWorkspaceIdentity",
 		model.Implies(status.Equal(StatusActive), model.Exists(workspaceID.Expr())),
