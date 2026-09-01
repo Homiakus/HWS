@@ -105,15 +105,15 @@ func printJSON(value string, err error) error {
 }
 
 type healthReport struct {
-	Status         string `json:"status"`
-	ConfigValid    bool   `json:"configValid"`
-	ConfigError    string `json:"configError"`
-	Applications   int    `json:"applications"`
-	Windows        int    `json:"windows"`
-	Views          int    `json:"views"`
-	PanelRevision  uint64 `json:"panelRevision"`
+	Status          string `json:"status"`
+	ConfigValid     bool   `json:"configValid"`
+	ConfigError     string `json:"configError"`
+	Applications    int    `json:"applications"`
+	Windows         int    `json:"windows"`
+	Views           int    `json:"views"`
+	PanelRevision   uint64 `json:"panelRevision"`
 	SurfaceRevision string `json:"surfaceRevision"`
-	Providers      []struct {
+	Providers       []struct {
 		ProviderID string `json:"providerId"`
 		Kind       string `json:"kind"`
 		Connected  bool   `json:"connected"`
