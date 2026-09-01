@@ -412,6 +412,7 @@ func mergeWindows(app *surface.ApplicationSurface, snap Snapshot) {
 					idx = i
 					break
 				}
+			}
 		}
 		if idx < 0 && patch.WindowID == "" && len(app.Windows) == 1 {
 			idx = 0
