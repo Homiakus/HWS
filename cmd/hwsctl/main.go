@@ -48,6 +48,19 @@ func run(args []string) error {
 			value, err := client.SpecJSON()
 			return printJSON(value, err)
 		})
+	case "tree":
+		return withClient(func(client *dbusapi.Client) error {
+			value, err := client.TreeJSON()
+			return printJSON(value, err)
+		})
+	case "path":
+		if len(args) != 1 {
+			return errors.New("usage: hwsctl path <node-id>")
+		}
+		return withClient(func(client *dbusapi.Client) error {
+			value, err := client.PathJSON(args[0])
+			return printJSON(value, err)
+		})
 	case "app":
 		if len(args) != 1 {
 			return errors.New("usage: hwsctl app <application-id>")
@@ -105,15 +118,18 @@ func printJSON(value string, err error) error {
 }
 
 type healthReport struct {
-	Status          string `json:"status"`
-	ConfigValid     bool   `json:"configValid"`
-	ConfigError     string `json:"configError"`
-	Applications    int    `json:"applications"`
-	Windows         int    `json:"windows"`
-	Views           int    `json:"views"`
-	PanelRevision   uint64 `json:"panelRevision"`
-	SurfaceRevision string `json:"surfaceRevision"`
-	Providers       []struct {
+	Status            string `json:"status"`
+	ConfigValid       bool   `json:"configValid"`
+	ConfigError       string `json:"configError"`
+	HierarchyValid    bool   `json:"hierarchyValid"`
+	HierarchyError    string `json:"hierarchyError"`
+	HierarchyRevision uint64 `json:"hierarchyRevision"`
+	Applications      int    `json:"applications"`
+	Windows           int    `json:"windows"`
+	Views             int    `json:"views"`
+	PanelRevision     uint64 `json:"panelRevision"`
+	SurfaceRevision   string `json:"surfaceRevision"`
+	Providers         []struct {
 		ProviderID string `json:"providerId"`
 		Kind       string `json:"kind"`
 		Connected  bool   `json:"connected"`
@@ -141,6 +157,11 @@ func runDoctor() error {
 		} else {
 			fmt.Printf("panel config: INVALID (%s)\n", health.ConfigError)
 		}
+		if health.HierarchyValid {
+			fmt.Printf("hierarchy: valid revision=%d\n", health.HierarchyRevision)
+		} else {
+			fmt.Printf("hierarchy: INVALID (%s)\n", health.HierarchyError)
+		}
 		sort.Slice(health.Providers, func(i, j int) bool {
 			return health.Providers[i].ProviderID < health.Providers[j].ProviderID
 		})
@@ -156,8 +177,8 @@ func runDoctor() error {
 			}
 			fmt.Printf("provider %-22s %-10s kind=%s rev=%d\n", provider.ProviderID, state, provider.Kind, provider.Revision)
 		}
-		if !health.ConfigValid {
-			return errors.New("doctor found an invalid panel configuration")
+		if !health.ConfigValid || !health.HierarchyValid {
+			return errors.New("doctor found an invalid configuration")
 		}
 		return nil
 	})
@@ -170,6 +191,8 @@ func printUsage() {
   doctor               print a human-readable daemon/provider diagnostic
   panel                print the current panel snapshot
   spec                 print the normalized Panel DSL spec
+  tree                 print the context hierarchy snapshot
+  path <node-id>       print a hierarchy path from root to node
   app <application-id> print one aggregated ApplicationSurface
   reload               reload Panel DSL configuration
 `)

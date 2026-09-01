@@ -44,6 +44,7 @@ func run() error {
 
 	registry := providers.NewRegistry()
 	hub := daemon.NewHub(registry)
+	runtime := daemon.NewRuntime(hub)
 	providerSocket := filepath.Join(runtimeDir, "hws", "providers.sock")
 	providerServer := providerserver.New(providerSocket, hub)
 	hub.SetActions(providerServer.Actions)
@@ -52,13 +53,18 @@ func run() error {
 	if err := hub.Configure(panelPath); err != nil {
 		log.Printf("panel config rejected; using last-known-good: %v", err)
 	}
+	hierarchyPath := filepath.Join(configHome, "hws", "hierarchy.json")
+	if err := runtime.ConfigureHierarchy(hierarchyPath); err != nil {
+		log.Printf("hierarchy config rejected; using last-known-good: %v", err)
+	}
 
-	dbusServer, err := dbusapi.OpenSession(hub)
+	dbusServer, err := dbusapi.OpenSession(runtime)
 	if err != nil {
 		return err
 	}
 	defer dbusServer.Close()
 	hub.SetNotifiers(dbusServer.EmitPanelChanged, dbusServer.EmitPanelConfigChanged)
+	runtime.SetTreeNotifier(dbusServer.EmitTreeChanged)
 
 	mprisCollector, err := mpris.OpenSession(hub)
 	if err != nil {
@@ -92,8 +98,11 @@ func run() error {
 	go hub.RunMaintenance(ctx, time.Second, func(err error) {
 		log.Printf("maintenance: %v", err)
 	})
+	go runtime.RunHierarchyMaintenance(ctx, time.Second, func(err error) {
+		log.Printf("hierarchy maintenance: %v", err)
+	})
 
-	log.Printf("hwsd ready: bus=%s provider_socket=%s panel=%s", "org.homiakus.HWS1", providerSocket, panelPath)
+	log.Printf("hwsd ready: bus=%s provider_socket=%s panel=%s hierarchy=%s", "org.homiakus.HWS1", providerSocket, panelPath, hierarchyPath)
 	select {
 	case <-ctx.Done():
 		return nil

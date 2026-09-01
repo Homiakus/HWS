@@ -17,6 +17,8 @@ type Backend interface {
 	PanelJSON() (string, error)
 	SpecJSON() (string, error)
 	HealthJSON() (string, error)
+	TreeJSON() (string, error)
+	PathJSON(string) (string, error)
 	ApplicationJSON(string) (string, error)
 	ReplaceShellSnapshotJSON(string) error
 	ReloadPanel() error
@@ -54,6 +56,7 @@ func (s *Service) Hello(clientProtocol uint32, clientInstance string) (uint32, s
 		"panel.snapshot":      "supported",
 		"panel.spec":          "supported",
 		"panel.reload":        "supported",
+		"tree.read":           "supported",
 		"shell.snapshot.push": "supported",
 		"surface.application": "supported",
 		"view.activate":       "supported",
@@ -74,6 +77,16 @@ func (s *Service) GetPanelSpec() (string, *dbus.Error) {
 
 func (s *Service) GetHealth() (string, *dbus.Error) {
 	value, err := s.backend.HealthJSON()
+	return value, asDBusError(err)
+}
+
+func (s *Service) GetTree() (string, *dbus.Error) {
+	value, err := s.backend.TreeJSON()
+	return value, asDBusError(err)
+}
+
+func (s *Service) GetPath(nodeID string) (string, *dbus.Error) {
+	value, err := s.backend.PathJSON(nodeID)
 	return value, asDBusError(err)
 }
 
@@ -151,6 +164,10 @@ func (s *Server) EmitPanelConfigChanged(revision uint64) {
 	s.emit("PanelConfigChanged", revision)
 }
 
+func (s *Server) EmitTreeChanged(revision uint64) {
+	s.emit("TreeChanged", revision)
+}
+
 func (s *Server) emit(signal string, args ...any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -190,6 +207,8 @@ func introspectionNode() *introspect.Node {
 					{Name: "GetPanelSnapshot", Args: []introspect.Arg{{Name: "json", Type: "s", Direction: "out"}}},
 					{Name: "GetPanelSpec", Args: []introspect.Arg{{Name: "json", Type: "s", Direction: "out"}}},
 					{Name: "GetHealth", Args: []introspect.Arg{{Name: "json", Type: "s", Direction: "out"}}},
+					{Name: "GetTree", Args: []introspect.Arg{{Name: "json", Type: "s", Direction: "out"}}},
+					{Name: "GetPath", Args: []introspect.Arg{{Name: "nodeId", Type: "s", Direction: "in"}, {Name: "json", Type: "s", Direction: "out"}}},
 					{Name: "GetApplicationSurface", Args: []introspect.Arg{{Name: "appId", Type: "s", Direction: "in"}, {Name: "json", Type: "s", Direction: "out"}}},
 					{Name: "SubmitShellSnapshot", Args: []introspect.Arg{{Name: "json", Type: "s", Direction: "in"}}},
 					{Name: "ReloadPanel", Args: []introspect.Arg{{Name: "ok", Type: "b", Direction: "out"}, {Name: "diagnostic", Type: "s", Direction: "out"}}},
@@ -199,6 +218,7 @@ func introspectionNode() *introspect.Node {
 				Signals: []introspect.Signal{
 					{Name: "PanelChanged", Args: []introspect.Arg{{Name: "revision", Type: "t"}}},
 					{Name: "PanelConfigChanged", Args: []introspect.Arg{{Name: "revision", Type: "t"}}},
+					{Name: "TreeChanged", Args: []introspect.Arg{{Name: "revision", Type: "t"}}},
 				},
 			},
 			introspect.IntrospectData,

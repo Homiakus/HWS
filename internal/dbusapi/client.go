@@ -82,6 +82,18 @@ func (c *Client) SpecJSON() (string, error) {
 	return c.stringCall("GetPanelSpec")
 }
 
+func (c *Client) TreeJSON() (string, error) {
+	return c.stringCall("GetTree")
+}
+
+func (c *Client) PathJSON(nodeID string) (string, error) {
+	var value string
+	if err := c.object.Call(ipc.InterfaceName+".GetPath", 0, nodeID).Store(&value); err != nil {
+		return "", fmt.Errorf("GetPath: %w", err)
+	}
+	return value, nil
+}
+
 func (c *Client) ApplicationJSON(appID string) (string, error) {
 	var value string
 	if err := c.object.Call(ipc.InterfaceName+".GetApplicationSurface", 0, appID).Store(&value); err != nil {

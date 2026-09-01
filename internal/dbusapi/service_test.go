@@ -11,6 +11,8 @@ type fakeBackend struct {
 	panel         string
 	spec          string
 	health        string
+	tree          string
+	path          string
 	app           string
 	shellSnapshot string
 	err           error
@@ -19,6 +21,8 @@ type fakeBackend struct {
 func (f *fakeBackend) PanelJSON() (string, error)             { return f.panel, f.err }
 func (f *fakeBackend) SpecJSON() (string, error)              { return f.spec, f.err }
 func (f *fakeBackend) HealthJSON() (string, error)            { return f.health, f.err }
+func (f *fakeBackend) TreeJSON() (string, error)              { return f.tree, f.err }
+func (f *fakeBackend) PathJSON(string) (string, error)        { return f.path, f.err }
 func (f *fakeBackend) ApplicationJSON(string) (string, error) { return f.app, f.err }
 func (f *fakeBackend) ReplaceShellSnapshotJSON(value string) error {
 	f.shellSnapshot = value
@@ -62,5 +66,16 @@ func TestServiceAcceptsShellSnapshot(t *testing.T) {
 	}
 	if backend.shellSnapshot != payload {
 		t.Fatalf("snapshot=%q", backend.shellSnapshot)
+	}
+}
+
+func TestServiceExposesHierarchy(t *testing.T) {
+	backend := &fakeBackend{tree: `{"rootId":"root"}`, path: `[{"id":"root"}]`}
+	s := NewService(backend)
+	if got, err := s.GetTree(); err != nil || got != backend.tree {
+		t.Fatalf("tree=%q err=%v", got, err)
+	}
+	if got, err := s.GetPath("root"); err != nil || got != backend.path {
+		t.Fatalf("path=%q err=%v", got, err)
 	}
 }
