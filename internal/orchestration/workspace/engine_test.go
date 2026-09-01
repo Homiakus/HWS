@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/Homiakus/HWS/internal/adapters/fake"
@@ -88,6 +89,60 @@ func TestRecoverMovesDegradedWorkspaceToActive(t *testing.T) {
 	}
 	if state.Status != StatusActive || state.ReachedRequired != 2 {
 		t.Fatalf("unexpected recovered state: %#v", state)
+	}
+}
+
+func TestProductionLifecycleSurvivesStoreReopen(t *testing.T) {
+	ctx := context.Background()
+	desired := domain.DesiredState{WorkspaceID: "durable-dev", Revision: "v1", Resources: []domain.ResourceSpec{
+		{ID: "editor", Kind: domain.ResourceDesktopApp, Required: true, Ownership: domain.OwnershipManaged, DesktopAppID: "dev.zed.Zed.desktop"},
+		{ID: "terminal", Kind: domain.ResourceTerminal, Required: true, Ownership: domain.OwnershipManaged, Executable: "bash"},
+	}}
+	definitions := catalog.NewMemory()
+	if err := definitions.Put(desired); err != nil {
+		t.Fatal(err)
+	}
+	desktop := fake.NewDesktop()
+	storePath := filepath.Join(t.TempDir(), "axiom")
+
+	first, err := OpenProduction(storePath, definitions, reconcile.New(desktop))
+	if err != nil {
+		t.Fatalf("OpenProduction first: %v", err)
+	}
+	if err := first.Activate(ctx, desired.WorkspaceID, desired.Revision, "activate:durable-dev:v1:1"); err != nil {
+		_ = first.Shutdown()
+		t.Fatalf("Activate: %v", err)
+	}
+	if err := first.Shutdown(); err != nil {
+		t.Fatalf("Shutdown first: %v", err)
+	}
+
+	second, err := OpenProduction(storePath, definitions, reconcile.New(desktop))
+	if err != nil {
+		t.Fatalf("OpenProduction second: %v", err)
+	}
+	defer func() {
+		if err := second.Shutdown(); err != nil {
+			t.Errorf("Shutdown second: %v", err)
+		}
+	}()
+
+	persisted, err := second.State(ctx, desired.WorkspaceID)
+	if err != nil {
+		t.Fatalf("State after reopen: %v", err)
+	}
+	if persisted.Status != StatusActive || persisted.ReachedRequired != 2 || persisted.TotalRequired != 2 {
+		t.Fatalf("unexpected persisted state: %#v", persisted)
+	}
+
+	if err := second.Recover(ctx, desired.WorkspaceID, "recover:durable-dev:v1:1"); err != nil {
+		t.Fatalf("Recover after reopen: %v", err)
+	}
+	if got := desktop.EnsureAttempts("editor"); got != 1 {
+		t.Fatalf("editor ensure attempts=%d want=1 after recovery", got)
+	}
+	if got := desktop.EnsureAttempts("terminal"); got != 1 {
+		t.Fatalf("terminal ensure attempts=%d want=1 after recovery", got)
 	}
 }
 
