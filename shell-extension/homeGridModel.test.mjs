@@ -78,12 +78,15 @@ test('path lookup is fail-closed for unknown nodes', () => {
     assert.deepEqual(pathToNode(model, 'missing'), []);
 });
 
-test('search ranks title prefixes and returns navigable full paths', () => {
+test('search ranks exact titles and returns navigable full paths', () => {
     const model = buildTreeModel(fixture());
-    const byTitle = searchTree(model, 'dev');
-    assert.equal(byTitle[0].node.id, 'dev');
-    assert.deepEqual(byTitle[0].path, ['root', 'dev']);
-    assert.ok(byTitle.some(result => result.node.id === 'develop'));
+    const exactTitle = searchTree(model, 'development');
+    assert.equal(exactTitle[0].node.id, 'dev');
+    assert.deepEqual(exactTitle[0].path, ['root', 'dev']);
+
+    const prefix = searchTree(model, 'dev');
+    assert.ok(prefix.some(result => result.node.id === 'dev'));
+    assert.ok(prefix.some(result => result.node.id === 'develop'));
 
     const byWorkspace = searchTree(model, 'hws-dev');
     assert.equal(byWorkspace[0].node.id, 'develop');
