@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/Homiakus/HWS/internal/application/reconcile"
 	"github.com/Homiakus/HWS/internal/domain"
@@ -15,9 +16,41 @@ type Resolver interface {
 
 type Lifecycle struct {
 	engine *axiom.Engine
+	close  func() error
 }
 
 func Open(resolver Resolver, reconciler *reconcile.Reconciler) (*Lifecycle, error) {
+	return openWithOptions(resolver, reconciler, nil)
+}
+
+func OpenProduction(storePath string, resolver Resolver, reconciler *reconcile.Reconciler) (*Lifecycle, error) {
+	if strings.TrimSpace(storePath) == "" {
+		return nil, fmt.Errorf("workspace lifecycle: store path is required")
+	}
+	store, err := axiom.OpenPebble(storePath)
+	if err != nil {
+		return nil, fmt.Errorf("workspace lifecycle: open Pebble store: %w", err)
+	}
+	lifecycle, err := openWithOptions(
+		resolver,
+		reconciler,
+		store.Close,
+		axiom.WithStore(store),
+		axiom.WithProductionMode(),
+	)
+	if err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+	return lifecycle, nil
+}
+
+func openWithOptions(
+	resolver Resolver,
+	reconciler *reconcile.Reconciler,
+	closeFn func() error,
+	options ...axiom.Option,
+) (*Lifecycle, error) {
 	if resolver == nil {
 		return nil, fmt.Errorf("workspace lifecycle: resolver is required")
 	}
@@ -25,8 +58,7 @@ func Open(resolver Resolver, reconciler *reconcile.Reconciler) (*Lifecycle, erro
 		return nil, fmt.Errorf("workspace lifecycle: reconciler is required")
 	}
 
-	engine, err := axiom.Open(
-		BuildDefinition(),
+	options = append(options,
 		axiom.ActTyped("ReconcileWorkspace", func(ctx context.Context, input ReconcileWorkspaceInput) (ReconcileWorkspaceOutput, error) {
 			desired, err := resolver.Resolve(domain.WorkspaceID(input.WorkspaceID), input.DefinitionRevision)
 			if err != nil {
@@ -58,10 +90,21 @@ func Open(resolver Resolver, reconciler *reconcile.Reconciler) (*Lifecycle, erro
 			return CloseWorkspaceOutput{Status: StatusInactive}, nil
 		}),
 	)
+
+	engine, err := axiom.Open(BuildDefinition(), options...)
 	if err != nil {
 		return nil, err
 	}
-	return &Lifecycle{engine: engine}, nil
+	return &Lifecycle{engine: engine, close: closeFn}, nil
+}
+
+func (l *Lifecycle) Shutdown() error {
+	if l == nil || l.close == nil {
+		return nil
+	}
+	closeFn := l.close
+	l.close = nil
+	return closeFn()
 }
 
 func (l *Lifecycle) Activate(ctx context.Context, workspaceID domain.WorkspaceID, revision, operationKey string) error {
