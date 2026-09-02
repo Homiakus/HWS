@@ -98,6 +98,10 @@
   background-color: rgba(255,255,255,0.18);
   box-shadow: inset 0 -2px rgba(255,255,255,0.88);
 }
+.hws-home-tile.activating {
+  background-color: rgba(120,190,255,0.16);
+  box-shadow: inset 0 -2px rgba(140,205,255,0.95);
+}
 .hws-home-tile.kind-project { font-weight: 650; }
 .hws-home-tile.kind-task { background-color: rgba(255,255,255,0.08); }
 .hws-home-status { padding: 5px 2px; opacity: 0.72; }
