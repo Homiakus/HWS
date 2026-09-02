@@ -15,6 +15,11 @@ import {
     selectPathNode,
 } from './homeGridModel.js';
 import {ShellExecutor} from './shellExecutor.js';
+import {
+    buildWorkspaceStateModel,
+    workspacePresentation,
+    workspaceStatusText,
+} from './workspaceStateModel.js';
 
 const HomeGridIndicator = GObject.registerClass(
 class HomeGridIndicator extends PanelMenu.Button {
@@ -38,19 +43,20 @@ class HomeGridIndicator extends PanelMenu.Button {
 });
 
 class HomeGridDialog extends ModalDialog.ModalDialog {
-    constructor(onActivateWorkspace) {
+    constructor(onWorkspaceAction) {
         super({styleClass: 'hws-home-modal', destroyOnClose: false});
-        this._onActivateWorkspace = onActivateWorkspace;
+        this._onWorkspaceAction = onWorkspaceAction;
         this._available = false;
         this._model = null;
+        this._workspaceStates = null;
         this._path = [];
         this._rowButtons = [];
         this._searchButtons = [];
         this._searchPaths = [];
         this._statusText = '';
         this._statusError = false;
-        this._activatingWorkspace = '';
-        this._activationToken = 0;
+        this._mutatingWorkspace = '';
+        this._mutationToken = 0;
 
         this._root = new St.BoxLayout({
             vertical: true,
@@ -130,6 +136,11 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
             style_class: 'hws-home-status',
             x_expand: true,
         });
+        this._workspaceActions = new St.BoxLayout({
+            vertical: false,
+            style_class: 'hws-workspace-actions',
+            x_expand: true,
+        });
         this._hint = new St.Label({
             text: '←/→ choose · ↑/↓ level · Enter open · Backspace parent · Ctrl+K search · Esc close',
             style_class: 'hws-home-hint',
@@ -142,6 +153,7 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
         this._root.add_child(this._breadcrumbs);
         this._root.add_child(this._rowsViewport);
         this._root.add_child(this._status);
+        this._root.add_child(this._workspaceActions);
         this._root.add_child(this._hint);
         this.contentLayout.add_child(this._root);
         this._render();
@@ -150,8 +162,8 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
     setAvailable(available) {
         this._available = Boolean(available);
         if (!this._available) {
-            this._activationToken++;
-            this._activatingWorkspace = '';
+            this._mutationToken++;
+            this._mutatingWorkspace = '';
         }
         this._render();
     }
@@ -176,6 +188,21 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
         this._render();
     }
 
+    setWorkspaceStates(payload) {
+        if (!payload) {
+            this._workspaceStates = null;
+            this._render();
+            return;
+        }
+        try {
+            this._workspaceStates = buildWorkspaceStateModel(payload);
+        } catch (error) {
+            this._statusText = `Workspace states rejected: ${error.message}`;
+            this._statusError = true;
+        }
+        this._render();
+    }
+
     resetPath() {
         if (!this._model)
             return;
@@ -195,6 +222,7 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
     _render() {
         this._breadcrumbs.destroy_all_children();
         this._rows.destroy_all_children();
+        this._workspaceActions.destroy_all_children();
         this._rowButtons = [];
         this._search.visible = this._available && Boolean(this._model);
 
@@ -202,6 +230,7 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
             this._revision.text = '';
             this._searchResults.destroy_all_children();
             this._searchResults.visible = false;
+            this._workspaceActions.visible = false;
             this._setStatus('hwsd is unavailable. Activity Strip fallback remains active.', true);
             this._hint.visible = false;
             return;
@@ -210,6 +239,7 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
             this._revision.text = '';
             this._searchResults.destroy_all_children();
             this._searchResults.visible = false;
+            this._workspaceActions.visible = false;
             this._setStatus(this._statusText || 'Loading hierarchy…', this._statusError);
             this._hint.visible = false;
             return;
@@ -217,7 +247,8 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
 
         const projection = rowsForPath(this._model, this._path);
         this._path = projection.path;
-        this._revision.text = `r${this._model.revision}`;
+        const workspaceRevision = this._workspaceStates ? ` · ws r${this._workspaceStates.revision}` : '';
+        this._revision.text = `tree r${this._model.revision}${workspaceRevision}`;
         this._renderBreadcrumbs();
 
         projection.rows.forEach((row, rowIndex) => {
@@ -236,16 +267,24 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
 
             const buttons = [];
             row.nodes.forEach((node, itemIndex) => {
+                const state = this._workspaceState(node);
+                const view = node.workspaceId ? workspacePresentation(state) : null;
+                const label = view?.badge ? `${node.title}  ${view.badge}` : node.title;
+                const styleClass = view
+                    ? `hws-home-tile kind-${node.kind} ${view.className}`
+                    : `hws-home-tile kind-${node.kind}`;
                 const button = new St.Button({
-                    label: node.title,
-                    style_class: `hws-home-tile kind-${node.kind}`,
+                    label,
+                    style_class: styleClass,
                     can_focus: true,
                     reactive: true,
                     track_hover: true,
                 });
-                button.accessible_name = `${node.title}, ${node.kind}`;
+                button.accessible_name = view
+                    ? `${node.title}, ${node.kind}, ${view.label}`
+                    : `${node.title}, ${node.kind}`;
                 button.toggle_style_class_name('selected', row.selectedId === node.id);
-                button.toggle_style_class_name('activating', Boolean(node.workspaceId) && node.workspaceId === this._activatingWorkspace);
+                button.toggle_style_class_name('mutating', Boolean(node.workspaceId) && node.workspaceId === this._mutatingWorkspace);
                 button.connect('clicked', () => this._choose(rowIndex, itemIndex));
                 button.connect('key-press-event', (_actor, event) =>
                     this._handleTileKey(event, rowIndex, itemIndex));
@@ -258,13 +297,45 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
 
         const selected = this._model.byId.get(this._path.at(-1));
         if (selected && this._path.length > 1 && (this._model.children.get(selected.id)?.length || 0) === 0) {
-            const workspace = selected.workspaceId ? ` · workspace ${selected.workspaceId}` : '';
-            this._setStatus(`${selected.kind}: ${selected.title}${workspace}`, false);
+            if (selected.workspaceId) {
+                const state = this._workspaceState(selected);
+                this._setStatus(`${selected.title} · ${selected.workspaceId} · ${workspaceStatusText(state)}`, false);
+                this._renderWorkspaceActions(selected, state);
+            } else {
+                this._setStatus(`${selected.kind}: ${selected.title}`, false);
+            }
         } else {
             this._setStatus(this._statusText, this._statusError);
         }
+        this._workspaceActions.visible = this._workspaceActions.get_n_children() > 0;
         this._hint.visible = true;
         this._renderSearch();
+    }
+
+    _renderWorkspaceActions(node, state) {
+        const view = workspacePresentation(state);
+        if (this._mutatingWorkspace === node.workspaceId || view.busy)
+            return;
+
+        if (view.primaryAction)
+            this._addWorkspaceAction(view.primaryAction === 'recover' ? 'Recover' : view.status === 'active' ? 'Focus / Reconcile' : 'Activate', node, view.primaryAction);
+        if (view.status === 'active' || view.status === 'degraded')
+            this._addWorkspaceAction('Suspend', node, 'suspend');
+        if (view.status === 'active' || view.status === 'degraded' || view.status === 'failed')
+            this._addWorkspaceAction('Close', node, 'close', true);
+    }
+
+    _addWorkspaceAction(label, node, action, danger = false) {
+        const button = new St.Button({
+            label,
+            style_class: danger ? 'hws-workspace-action danger' : 'hws-workspace-action',
+            can_focus: true,
+            reactive: true,
+            track_hover: true,
+        });
+        button.accessible_name = `${label} workspace ${node.title}`;
+        button.connect('clicked', () => this._mutateWorkspace(node, action));
+        this._workspaceActions.add_child(button);
     }
 
     _renderSearch() {
@@ -286,14 +357,16 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
                 .map(id => this._model.byId.get(id)?.title)
                 .filter(Boolean)
                 .join(' › ');
+            const state = this._workspaceState(result.node);
+            const status = result.node.workspaceId ? ` · ${workspacePresentation(state).label}` : '';
             const button = new St.Button({
-                label: `${pathLabel}   · ${result.node.kind}`,
+                label: `${pathLabel}   · ${result.node.kind}${status}`,
                 style_class: 'hws-home-search-result',
                 can_focus: true,
                 x_expand: true,
                 x_align: Clutter.ActorAlign.FILL,
             });
-            button.accessible_name = `Jump to ${pathLabel}`;
+            button.accessible_name = `Jump to ${pathLabel}${status}`;
             button.connect('clicked', () => this._jumpToPath(result.path));
             button.connect('key-press-event', (_actor, event) => {
                 const key = event.get_key_symbol();
@@ -363,46 +436,64 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
         if (hasChildren) {
             this._focusTile(rowIndex + 1, 0);
         } else if (node.workspaceId) {
-            this._activateWorkspace(node);
+            const view = workspacePresentation(this._workspaceState(node));
+            if (view.primaryAction)
+                this._mutateWorkspace(node, view.primaryAction);
+            else
+                this._focusSelected(rowIndex, node.id);
         } else {
             this._focusSelected(rowIndex, node.id);
         }
     }
 
-    _activateWorkspace(node) {
-        if (!this._onActivateWorkspace) {
-            this._setStatus(`Workspace activation is unavailable for ${node.title}`, true);
+    _workspaceState(node) {
+        if (!node?.workspaceId)
+            return null;
+        return this._workspaceStates?.byId.get(node.workspaceId) ?? {
+            workspaceId: node.workspaceId,
+            status: 'inactive',
+            definitionRevision: '',
+            reachedRequired: 0,
+            totalRequired: 0,
+            lastFailureCode: '',
+        };
+    }
+
+    _mutateWorkspace(node, action) {
+        if (!this._onWorkspaceAction) {
+            this._setStatus(`Workspace control is unavailable for ${node.title}`, true);
             return;
         }
-        if (this._activatingWorkspace === node.workspaceId)
+        if (this._mutatingWorkspace)
             return;
 
-        const token = ++this._activationToken;
-        this._activatingWorkspace = node.workspaceId;
+        const token = ++this._mutationToken;
+        this._mutatingWorkspace = node.workspaceId;
         this._render();
-        this._setStatus(`Activating ${node.title}…`, false);
+        this._setStatus(`${workspaceActionLabel(action)} ${node.title}…`, false);
 
-        this._onActivateWorkspace(
+        this._onWorkspaceAction(
+            action,
             node.workspaceId,
             state => {
-                if (token !== this._activationToken)
+                if (token !== this._mutationToken)
                     return;
-                this._activatingWorkspace = '';
+                this._mutatingWorkspace = '';
                 const status = typeof state?.status === 'string' ? state.status : 'unknown';
-                if (status === 'active') {
+                if ((action === 'activate' || action === 'recover' || action === 'resume') && status === 'active') {
                     this.close(global.get_current_time());
                     return;
                 }
-                const failure = state?.lastFailureCode ? ` · ${state.lastFailureCode}` : '';
                 this._render();
-                this._setStatus(`Workspace ${node.title}: ${status}${failure}`, status !== 'degraded');
+                const failure = state?.lastFailureCode ? ` · ${state.lastFailureCode}` : '';
+                this._setStatus(`Workspace ${node.title}: ${status}${failure}`, status === 'failed');
             },
             error => {
-                if (token !== this._activationToken)
+                if (token !== this._mutationToken)
                     return;
-                this._activatingWorkspace = '';
+                this._mutatingWorkspace = '';
                 this._render();
-                this._setStatus(`Activation failed: ${error?.message || String(error)}`, true);
+                this._setStatus(`${workspaceActionLabel(action)} failed: ${error?.message || String(error)}`, true);
             }
         );
     }
@@ -487,6 +578,7 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
 class HomeGridController {
     constructor() {
         this._tree = null;
+        this._workspaceStates = null;
         this._available = false;
         this._dialog = null;
         this._open = false;
@@ -499,12 +591,18 @@ class HomeGridController {
             onAvailabilityChanged: available => {
                 this._available = available;
                 this._dialog?.setAvailable(available);
-                if (available)
+                if (available) {
                     this._client.queueTreeRefresh();
+                    this._client.queueWorkspaceStatesRefresh();
+                }
             },
             onTreeChanged: tree => {
                 this._tree = tree;
                 this._dialog?.setTree(tree);
+            },
+            onWorkspaceStatesChanged: states => {
+                this._workspaceStates = states;
+                this._dialog?.setWorkspaceStates(states);
             },
             onShellAction: action => this._executor?.handle(action),
         });
@@ -516,8 +614,8 @@ class HomeGridController {
     _ensureDialog() {
         if (this._dialog)
             return this._dialog;
-        this._dialog = new HomeGridDialog((workspaceID, done, failed) =>
-            this._client.activateWorkspace(workspaceID, done, failed));
+        this._dialog = new HomeGridDialog((action, workspaceID, done, failed) =>
+            this._runWorkspaceAction(action, workspaceID, done, failed));
         this._dialog.connect('opened', () => {
             this._open = true;
         });
@@ -527,11 +625,36 @@ class HomeGridController {
         return this._dialog;
     }
 
+    _runWorkspaceAction(action, workspaceID, done, failed) {
+        switch (action) {
+        case 'activate':
+            this._client.activateWorkspace(workspaceID, done, failed);
+            break;
+        case 'recover':
+            this._client.recoverWorkspace(workspaceID, done, failed);
+            break;
+        case 'resume':
+            this._client.resumeWorkspace(workspaceID, done, failed);
+            break;
+        case 'suspend':
+            this._client.suspendWorkspace(workspaceID, done, failed);
+            break;
+        case 'close':
+            this._client.closeWorkspace(workspaceID, done, failed);
+            break;
+        default:
+            failed?.(new Error(`unsupported workspace action ${action}`));
+            break;
+        }
+    }
+
     open() {
         const dialog = this._ensureDialog();
         dialog.setAvailable(this._available);
         dialog.setTree(this._tree);
+        dialog.setWorkspaceStates(this._workspaceStates);
         this._client.queueTreeRefresh();
+        this._client.queueWorkspaceStatesRefresh();
         dialog.open(global.get_current_time());
     }
 
@@ -555,6 +678,21 @@ class HomeGridController {
         this._client = null;
         this._executor?.destroy();
         this._executor = null;
+    }
+}
+
+function workspaceActionLabel(action) {
+    switch (action) {
+    case 'recover':
+        return 'Recovering';
+    case 'resume':
+        return 'Resuming';
+    case 'suspend':
+        return 'Suspending';
+    case 'close':
+        return 'Closing';
+    default:
+        return 'Activating';
     }
 }
 
