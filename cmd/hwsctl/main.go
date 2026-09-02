@@ -8,6 +8,8 @@ import (
 	"log"
 	"os"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/Homiakus/HWS/internal/adapters/fake"
 	"github.com/Homiakus/HWS/internal/application/reconcile"
@@ -69,6 +71,8 @@ func run(args []string) error {
 			value, err := client.ApplicationJSON(args[0])
 			return printJSON(value, err)
 		})
+	case "workspace":
+		return runWorkspace(args)
 	case "reload":
 		return withClient(func(client *dbusapi.Client) error {
 			ok, diagnostic, err := client.ReloadPanel()
@@ -89,6 +93,63 @@ func run(args []string) error {
 	default:
 		return fmt.Errorf("unknown command %q; run hwsctl help", command)
 	}
+}
+
+func runWorkspace(args []string) error {
+	if len(args) < 2 {
+		return errors.New("usage: hwsctl workspace <activate|state|recover|resume|suspend|close> <workspace-id> [operation-key]")
+	}
+	action := args[0]
+	workspaceID := strings.TrimSpace(args[1])
+	if workspaceID == "" {
+		return errors.New("workspace id is required")
+	}
+	return withClient(func(client *dbusapi.Client) error {
+		switch action {
+		case "state":
+			if len(args) != 2 {
+				return errors.New("usage: hwsctl workspace state <workspace-id>")
+			}
+			value, err := client.WorkspaceStateJSON(workspaceID)
+			return printJSON(value, err)
+		case "suspend":
+			if len(args) != 2 {
+				return errors.New("usage: hwsctl workspace suspend <workspace-id>")
+			}
+			value, err := client.SuspendWorkspace(workspaceID)
+			return printJSON(value, err)
+		case "activate", "recover", "resume", "close":
+			if len(args) > 3 {
+				return fmt.Errorf("usage: hwsctl workspace %s <workspace-id> [operation-key]", action)
+			}
+			operationKey := operationKey(action, workspaceID, args[2:])
+			var value string
+			var err error
+			switch action {
+			case "activate":
+				value, err = client.ActivateWorkspace(workspaceID, operationKey)
+			case "recover":
+				value, err = client.RecoverWorkspace(workspaceID, operationKey)
+			case "resume":
+				value, err = client.ResumeWorkspace(workspaceID, operationKey)
+			case "close":
+				value, err = client.CloseWorkspace(workspaceID, operationKey)
+			}
+			if err == nil {
+				fmt.Fprintf(os.Stderr, "operation-key: %s\n", operationKey)
+			}
+			return printJSON(value, err)
+		default:
+			return fmt.Errorf("unknown workspace action %q", action)
+		}
+	})
+}
+
+func operationKey(action, workspaceID string, optional []string) string {
+	if len(optional) == 1 && strings.TrimSpace(optional[0]) != "" {
+		return strings.TrimSpace(optional[0])
+	}
+	return fmt.Sprintf("%s:%s:%d", action, workspaceID, time.Now().UTC().UnixNano())
 }
 
 func withClient(run func(*dbusapi.Client) error) error {
@@ -118,18 +179,23 @@ func printJSON(value string, err error) error {
 }
 
 type healthReport struct {
-	Status            string `json:"status"`
-	ConfigValid       bool   `json:"configValid"`
-	ConfigError       string `json:"configError"`
-	HierarchyValid    bool   `json:"hierarchyValid"`
-	HierarchyError    string `json:"hierarchyError"`
-	HierarchyRevision uint64 `json:"hierarchyRevision"`
-	Applications      int    `json:"applications"`
-	Windows           int    `json:"windows"`
-	Views             int    `json:"views"`
-	PanelRevision     uint64 `json:"panelRevision"`
-	SurfaceRevision   string `json:"surfaceRevision"`
-	Providers         []struct {
+	Status                   string `json:"status"`
+	ConfigValid              bool   `json:"configValid"`
+	ConfigError              string `json:"configError"`
+	HierarchyValid           bool   `json:"hierarchyValid"`
+	HierarchyError           string `json:"hierarchyError"`
+	HierarchyRevision        uint64 `json:"hierarchyRevision"`
+	WorkspaceCatalogValid    bool   `json:"workspaceCatalogValid"`
+	WorkspaceCatalogError    string `json:"workspaceCatalogError"`
+	WorkspaceCatalogRevision uint64 `json:"workspaceCatalogRevision"`
+	WorkspaceDefinitions     int    `json:"workspaceDefinitions"`
+	WorkspaceLifecycleReady  bool   `json:"workspaceLifecycleReady"`
+	Applications             int    `json:"applications"`
+	Windows                  int    `json:"windows"`
+	Views                    int    `json:"views"`
+	PanelRevision            uint64 `json:"panelRevision"`
+	SurfaceRevision          string `json:"surfaceRevision"`
+	Providers                []struct {
 		ProviderID string `json:"providerId"`
 		Kind       string `json:"kind"`
 		Connected  bool   `json:"connected"`
@@ -162,6 +228,11 @@ func runDoctor() error {
 		} else {
 			fmt.Printf("hierarchy: INVALID (%s)\n", health.HierarchyError)
 		}
+		if health.WorkspaceCatalogValid {
+			fmt.Printf("workspaces: valid revision=%d definitions=%d lifecycle-ready=%t\n", health.WorkspaceCatalogRevision, health.WorkspaceDefinitions, health.WorkspaceLifecycleReady)
+		} else {
+			fmt.Printf("workspaces: INVALID (%s)\n", health.WorkspaceCatalogError)
+		}
 		sort.Slice(health.Providers, func(i, j int) bool {
 			return health.Providers[i].ProviderID < health.Providers[j].ProviderID
 		})
@@ -177,8 +248,8 @@ func runDoctor() error {
 			}
 			fmt.Printf("provider %-22s %-10s kind=%s rev=%d\n", provider.ProviderID, state, provider.Kind, provider.Revision)
 		}
-		if !health.ConfigValid || !health.HierarchyValid {
-			return errors.New("doctor found an invalid configuration")
+		if !health.ConfigValid || !health.HierarchyValid || !health.WorkspaceCatalogValid || !health.WorkspaceLifecycleReady {
+			return errors.New("doctor found an invalid or unavailable subsystem")
 		}
 		return nil
 	})
@@ -186,15 +257,23 @@ func runDoctor() error {
 
 func printUsage() {
 	fmt.Print(`hwsctl commands:
-  demo                 run the deterministic headless workspace demo (default)
-  health               print daemon health JSON
-  doctor               print a human-readable daemon/provider diagnostic
-  panel                print the current panel snapshot
-  spec                 print the normalized Panel DSL spec
-  tree                 print the context hierarchy snapshot
-  path <node-id>       print a hierarchy path from root to node
-  app <application-id> print one aggregated ApplicationSurface
-  reload               reload Panel DSL configuration
+  demo                                      run the deterministic headless workspace demo (default)
+  health                                    print daemon health JSON
+  doctor                                    print a human-readable daemon/provider diagnostic
+  panel                                     print the current panel snapshot
+  spec                                      print the normalized Panel DSL spec
+  tree                                      print the context hierarchy snapshot
+  path <node-id>                            print a hierarchy path from root to node
+  app <application-id>                      print one aggregated ApplicationSurface
+  workspace state <id>                      print durable workspace lifecycle state
+  workspace activate <id> [operation-key]   activate the catalog's current revision
+  workspace recover <id> [operation-key]    reconcile a degraded/failed workspace
+  workspace resume <id> [operation-key]     resume/reconcile a suspended workspace
+  workspace suspend <id>                    mark workspace inactive without closing resources (v1 semantics)
+  workspace close <id> [operation-key]      close HWS-managed resources only
+  reload                                    reload Panel DSL configuration
+
+Supplying an operation key makes retries explicitly idempotent. If omitted, hwsctl generates a unique key.
 `)
 }
 
