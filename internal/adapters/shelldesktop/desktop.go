@@ -5,16 +5,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/Homiakus/HWS/internal/domain"
+	"github.com/Homiakus/HWS/internal/providers/gnomeshell"
 	"github.com/Homiakus/HWS/internal/shellaction"
 	"github.com/Homiakus/HWS/internal/surface"
 )
 
 type SurfaceReader interface {
 	SurfaceSnapshot() surface.Snapshot
+	ShellSnapshot() gnomeshell.Snapshot
 }
 
 type ActionRequester interface {
@@ -48,9 +52,11 @@ func (d *Desktop) Observe(_ context.Context, desired domain.DesiredState) (domai
 		return domain.ObservedState{}, errors.New("shell desktop: surface reader is unavailable")
 	}
 	snapshot := d.reader.SurfaceSnapshot()
+	shell := d.reader.ShellSnapshot()
 	observed := domain.ObservedState{
-		WorkspaceID: desired.WorkspaceID,
-		Resources:   make(map[domain.ResourceID]domain.ResourceObservation),
+		WorkspaceID:      desired.WorkspaceID,
+		TopologyRevision: shell.Topology.Revision,
+		Resources:        make(map[domain.ResourceID]domain.ResourceObservation),
 	}
 	for _, resource := range desired.Resources {
 		if resource.Kind != domain.ResourceDesktopApp {
@@ -71,7 +77,7 @@ func (d *Desktop) Observe(_ context.Context, desired domain.DesiredState) (domai
 			windowIDs = append(windowIDs, string(window.ID))
 		}
 		sessionRef, _ := json.Marshal(windowIDs)
-		observed.Resources[resource.ID] = domain.ResourceObservation{
+		observation := domain.ResourceObservation{
 			ResourceID: resource.ID,
 			Present:    true,
 			Ready:      len(app.Windows) > 0,
@@ -79,6 +85,36 @@ func (d *Desktop) Observe(_ context.Context, desired domain.DesiredState) (domai
 			SessionRef: string(sessionRef),
 			AppID:      string(app.AppID),
 		}
+		if resource.Placement != nil {
+			observation.Ready = false
+			target, err := resolvePlacement(resource.Placement, shell.Topology)
+			if err != nil {
+				observation.ReasonCode = "topology_unavailable"
+				observed.Resources[resource.ID] = observation
+				continue
+			}
+			shellApp, shellOK := findShellApplication(shell, resource.DesktopAppID)
+			window, windowOK := anchorWindow(shellApp)
+			placement := &domain.PlacementObservation{
+				TopologyRevision: shell.Topology.Revision,
+				MonitorRef:       target.MonitorRef,
+				Workspace:        target.Workspace,
+			}
+			if shellOK && windowOK {
+				placement.MonitorRef = window.MonitorRef
+				placement.Workspace = parseWorkspaceIndex(window.WorkspaceID)
+				placement.Rect = window.Frame
+				placement.Reached = placementReached(target, window, shell.Topology.Revision)
+				observation.Ready = placement.Reached
+				if !placement.Reached {
+					observation.ReasonCode = "placement_unreached"
+				}
+			} else {
+				observation.ReasonCode = "window_geometry_unavailable"
+			}
+			observation.Placement = placement
+		}
+		observed.Resources[resource.ID] = observation
 	}
 	return observed, nil
 }
@@ -100,16 +136,77 @@ func (d *Desktop) Ensure(ctx context.Context, desired domain.DesiredState, resou
 		return domain.ResourceObservation{}, err
 	}
 	if !result.Success {
-		code := result.Code
-		if code == "" {
-			code = "shell_action_failed"
-		}
-		return domain.ResourceObservation{}, fmt.Errorf("shell desktop: ensure %s failed (%s): %s", resource.ID, code, result.Message)
+		return domain.ResourceObservation{}, shellActionError("ensure", resource.ID, result)
 	}
 	if result.Changed && resource.Ownership == domain.OwnershipManaged {
 		d.markManaged(desired.WorkspaceID, resource.ID, true)
 	}
 
+	if err := d.waitPresent(ctx, resource.DesktopAppID); err != nil {
+		return domain.ResourceObservation{}, fmt.Errorf("shell desktop: wait for %s: %w", resource.ID, err)
+	}
+	if resource.Placement != nil {
+		if err := d.ensurePlacement(ctx, desired, resource); err != nil {
+			return domain.ResourceObservation{}, err
+		}
+	}
+	return d.waitReady(ctx, desired, resource.ID, "")
+}
+
+func (d *Desktop) ensurePlacement(ctx context.Context, desired domain.DesiredState, resource domain.ResourceSpec) error {
+	shell := d.reader.ShellSnapshot()
+	target, err := resolvePlacement(resource.Placement, shell.Topology)
+	if err != nil {
+		return err
+	}
+	app, ok := findShellApplication(shell, resource.DesktopAppID)
+	if !ok {
+		return fmt.Errorf("shell desktop: native application %s is not observed", resource.DesktopAppID)
+	}
+	window, ok := anchorWindow(app)
+	if !ok {
+		return fmt.Errorf("shell desktop: application %s has no placeable window", resource.DesktopAppID)
+	}
+	if placementReached(target, window, shell.Topology.Revision) {
+		return nil
+	}
+	result, err := d.actions.Request(ctx, shellaction.Request{
+		Kind:             shellaction.KindPlaceWindow,
+		WorkspaceID:      string(desired.WorkspaceID),
+		ResourceID:       string(resource.ID),
+		WindowID:         window.ID,
+		TopologyRevision: target.TopologyRevision,
+		MonitorRef:       target.MonitorRef,
+		MonitorIndex:     target.MonitorIndex,
+		TargetWorkspace:  target.Workspace,
+		Rect:             target.Rect,
+	})
+	if err != nil {
+		return err
+	}
+	if !result.Success {
+		return shellActionError("place", resource.ID, result)
+	}
+	_, err = d.waitReady(ctx, desired, resource.ID, target.TopologyRevision)
+	return err
+}
+
+func (d *Desktop) waitPresent(ctx context.Context, desktopAppID string) error {
+	ticker := time.NewTicker(d.poll)
+	defer ticker.Stop()
+	for {
+		if app, ok := findApplication(d.reader.SurfaceSnapshot(), desktopAppID); ok && len(app.Windows) > 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func (d *Desktop) waitReady(ctx context.Context, desired domain.DesiredState, resourceID domain.ResourceID, expectedTopology string) (domain.ResourceObservation, error) {
 	ticker := time.NewTicker(d.poll)
 	defer ticker.Stop()
 	for {
@@ -117,15 +214,26 @@ func (d *Desktop) Ensure(ctx context.Context, desired domain.DesiredState, resou
 		if err != nil {
 			return domain.ResourceObservation{}, err
 		}
-		if observation, ok := observed.Resources[resource.ID]; ok && observation.Present && observation.Ready {
+		if expectedTopology != "" && observed.TopologyRevision != expectedTopology {
+			return domain.ResourceObservation{}, fmt.Errorf("shell desktop: topology changed from %s to %s", expectedTopology, observed.TopologyRevision)
+		}
+		if observation, ok := observed.Resources[resourceID]; ok && observation.Present && observation.Ready {
 			return observation, nil
 		}
 		select {
 		case <-ctx.Done():
-			return domain.ResourceObservation{}, fmt.Errorf("shell desktop: wait for %s: %w", resource.ID, ctx.Err())
+			return domain.ResourceObservation{}, ctx.Err()
 		case <-ticker.C:
 		}
 	}
+}
+
+func shellActionError(action string, resourceID domain.ResourceID, result shellaction.Result) error {
+	code := result.Code
+	if code == "" {
+		code = "shell_action_failed"
+	}
+	return fmt.Errorf("shell desktop: %s %s failed (%s): %s", action, resourceID, code, result.Message)
 }
 
 func (d *Desktop) Close(ctx context.Context, desired domain.DesiredState, resource domain.ResourceSpec, observed domain.ResourceObservation) error {
@@ -219,4 +327,12 @@ func findApplication(snapshot surface.Snapshot, desktopAppID string) (surface.Ap
 		}
 	}
 	return surface.ApplicationSurface{}, false
+}
+
+func parseWorkspaceIndex(value string) int {
+	index, err := strconv.Atoi(strings.TrimPrefix(value, "workspace:"))
+	if err != nil || index < 0 {
+		return -1
+	}
+	return index
 }
