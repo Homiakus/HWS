@@ -107,12 +107,78 @@ func (r *Runtime) ActivateWorkspaceJSON(workspaceID, operationKey string) (strin
 	if err != nil {
 		return "", err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	if err := r.workspaceLifecycle.Activate(ctx, desired.WorkspaceID, desired.Revision, operationKey); err != nil {
+	return r.runWorkspaceMutation(desired.WorkspaceID, 20*time.Second, func(ctx context.Context) error {
+		return r.workspaceLifecycle.Activate(ctx, desired.WorkspaceID, desired.Revision, operationKey)
+	})
+}
+
+func (r *Runtime) RecoverWorkspaceJSON(workspaceID, operationKey string) (string, error) {
+	id, operationKey, err := validateWorkspaceMutation(workspaceID, operationKey)
+	if err != nil {
 		return "", err
 	}
-	state, err := r.workspaceLifecycle.State(ctx, desired.WorkspaceID)
+	return r.runWorkspaceMutation(id, 20*time.Second, func(ctx context.Context) error {
+		return r.workspaceLifecycle.Recover(ctx, id, operationKey)
+	})
+}
+
+func (r *Runtime) ResumeWorkspaceJSON(workspaceID, operationKey string) (string, error) {
+	id, operationKey, err := validateWorkspaceMutation(workspaceID, operationKey)
+	if err != nil {
+		return "", err
+	}
+	return r.runWorkspaceMutation(id, 20*time.Second, func(ctx context.Context) error {
+		return r.workspaceLifecycle.Resume(ctx, id, operationKey)
+	})
+}
+
+func (r *Runtime) SuspendWorkspaceJSON(workspaceID string) (string, error) {
+	id, err := validateWorkspaceID(workspaceID)
+	if err != nil {
+		return "", err
+	}
+	return r.runWorkspaceMutation(id, 5*time.Second, func(ctx context.Context) error {
+		return r.workspaceLifecycle.Suspend(ctx, id)
+	})
+}
+
+func (r *Runtime) CloseWorkspaceJSON(workspaceID, operationKey string) (string, error) {
+	id, operationKey, err := validateWorkspaceMutation(workspaceID, operationKey)
+	if err != nil {
+		return "", err
+	}
+	return r.runWorkspaceMutation(id, 20*time.Second, func(ctx context.Context) error {
+		return r.workspaceLifecycle.Close(ctx, id, operationKey)
+	})
+}
+
+func (r *Runtime) WorkspaceStateJSON(workspaceID string) (string, error) {
+	id, err := validateWorkspaceID(workspaceID)
+	if err != nil {
+		return "", err
+	}
+	if r.workspaceLifecycle == nil {
+		return "", errors.New("workspace lifecycle is unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return r.workspaceStateJSON(ctx, id)
+}
+
+func (r *Runtime) runWorkspaceMutation(workspaceID domain.WorkspaceID, timeout time.Duration, mutate func(context.Context) error) (string, error) {
+	if r.workspaceLifecycle == nil {
+		return "", errors.New("workspace lifecycle is unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := mutate(ctx); err != nil {
+		return "", err
+	}
+	return r.workspaceStateJSON(ctx, workspaceID)
+}
+
+func (r *Runtime) workspaceStateJSON(ctx context.Context, workspaceID domain.WorkspaceID) (string, error) {
+	state, err := r.workspaceLifecycle.State(ctx, workspaceID)
 	if err != nil {
 		return "", err
 	}
@@ -123,25 +189,24 @@ func (r *Runtime) ActivateWorkspaceJSON(workspaceID, operationKey string) (strin
 	return string(data), nil
 }
 
-func (r *Runtime) WorkspaceStateJSON(workspaceID string) (string, error) {
-	if r.workspaceLifecycle == nil {
-		return "", errors.New("workspace lifecycle is unavailable")
-	}
+func validateWorkspaceID(workspaceID string) (domain.WorkspaceID, error) {
 	id := domain.WorkspaceID(strings.TrimSpace(workspaceID))
 	if id == "" {
 		return "", errors.New("workspace id is required")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	state, err := r.workspaceLifecycle.State(ctx, id)
+	return id, nil
+}
+
+func validateWorkspaceMutation(workspaceID, operationKey string) (domain.WorkspaceID, string, error) {
+	id, err := validateWorkspaceID(workspaceID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	data, err := json.Marshal(state)
-	if err != nil {
-		return "", err
+	operationKey = strings.TrimSpace(operationKey)
+	if operationKey == "" {
+		return "", "", errors.New("workspace operation key is required")
 	}
-	return string(data), nil
+	return id, operationKey, nil
 }
 
 func (r *Runtime) SetTreeNotifier(notify func(uint64)) {
