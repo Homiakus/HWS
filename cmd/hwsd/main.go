@@ -30,13 +30,13 @@ func run() error {
 	if runtimeDir == "" {
 		return errors.New("XDG_RUNTIME_DIR is required; refusing insecure /tmp provider socket fallback")
 	}
-	configHome := os.Getenv("XDG_CONFIG_HOME")
-	if configHome == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return err
-		}
-		configHome = filepath.Join(home, ".config")
+	configHome, err := xdgHome("XDG_CONFIG_HOME", ".config")
+	if err != nil {
+		return err
+	}
+	stateHome, err := xdgHome("XDG_STATE_HOME", ".local", "state")
+	if err != nil {
+		return err
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -57,6 +57,15 @@ func run() error {
 	if err := runtime.ConfigureHierarchy(hierarchyPath); err != nil {
 		log.Printf("hierarchy config rejected; using last-known-good: %v", err)
 	}
+	workspacePath := filepath.Join(configHome, "hws", "workspaces.json")
+	if err := runtime.ConfigureWorkspaces(workspacePath); err != nil {
+		log.Printf("workspace catalog rejected; using last-known-good: %v", err)
+	}
+	workspaceStatePath := filepath.Join(stateHome, "hws", "workspace-lifecycle")
+	if err := runtime.OpenWorkspaceLifecycle(workspaceStatePath); err != nil {
+		return fmt.Errorf("open workspace lifecycle: %w", err)
+	}
+	defer runtime.Shutdown()
 
 	dbusServer, err := dbusapi.OpenSession(runtime)
 	if err != nil {
@@ -65,6 +74,7 @@ func run() error {
 	defer dbusServer.Close()
 	hub.SetNotifiers(dbusServer.EmitPanelChanged, dbusServer.EmitPanelConfigChanged)
 	runtime.SetTreeNotifier(dbusServer.EmitTreeChanged)
+	runtime.SetShellActionEmitter(dbusServer.EmitShellActionRequested)
 
 	mprisCollector, err := mpris.OpenSession(hub)
 	if err != nil {
@@ -101,12 +111,35 @@ func run() error {
 	go runtime.RunHierarchyMaintenance(ctx, time.Second, func(err error) {
 		log.Printf("hierarchy maintenance: %v", err)
 	})
+	go runtime.RunWorkspaceMaintenance(ctx, time.Second, func(err error) {
+		log.Printf("workspace maintenance: %v", err)
+	})
 
-	log.Printf("hwsd ready: bus=%s provider_socket=%s panel=%s hierarchy=%s", "org.homiakus.HWS1", providerSocket, panelPath, hierarchyPath)
+	log.Printf(
+		"hwsd ready: bus=%s provider_socket=%s panel=%s hierarchy=%s workspaces=%s workspace_state=%s",
+		"org.homiakus.HWS1",
+		providerSocket,
+		panelPath,
+		hierarchyPath,
+		workspacePath,
+		workspaceStatePath,
+	)
 	select {
 	case <-ctx.Done():
 		return nil
 	case err := <-errs:
 		return err
 	}
+}
+
+func xdgHome(envName string, fallback ...string) (string, error) {
+	if value := os.Getenv(envName); value != "" {
+		return value, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	parts := append([]string{home}, fallback...)
+	return filepath.Join(parts...), nil
 }

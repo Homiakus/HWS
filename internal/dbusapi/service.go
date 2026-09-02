@@ -52,15 +52,18 @@ func (s *Service) Hello(clientProtocol uint32, clientInstance string) (uint32, s
 		return 0, "", "", "", dbus.NewError(ipc.InterfaceName+".InvalidClient", []any{"client instance is required"})
 	}
 	capabilities, _ := json.Marshal(map[string]string{
-		"health":              "supported",
-		"panel.snapshot":      "supported",
-		"panel.spec":          "supported",
-		"panel.reload":        "supported",
-		"tree.read":           "supported",
-		"shell.snapshot.push": "supported",
-		"surface.application": "supported",
-		"view.activate":       "supported",
-		"view.close":          "supported",
+		"health":                "supported",
+		"panel.snapshot":        "supported",
+		"panel.spec":            "supported",
+		"panel.reload":          "supported",
+		"tree.read":             "supported",
+		"shell.snapshot.push":   "supported",
+		"shell.action.complete": "supported",
+		"surface.application":   "supported",
+		"view.activate":         "supported",
+		"view.close":            "supported",
+		"workspace.activate":    "supported",
+		"workspace.state":       "supported",
 	})
 	return ipc.ProtocolVersion, s.serverInstance, s.revisionEpoch, string(capabilities), nil
 }
@@ -211,14 +214,18 @@ func introspectionNode() *introspect.Node {
 					{Name: "GetPath", Args: []introspect.Arg{{Name: "nodeId", Type: "s", Direction: "in"}, {Name: "json", Type: "s", Direction: "out"}}},
 					{Name: "GetApplicationSurface", Args: []introspect.Arg{{Name: "appId", Type: "s", Direction: "in"}, {Name: "json", Type: "s", Direction: "out"}}},
 					{Name: "SubmitShellSnapshot", Args: []introspect.Arg{{Name: "json", Type: "s", Direction: "in"}}},
+					{Name: "CompleteShellAction", Args: []introspect.Arg{{Name: "json", Type: "s", Direction: "in"}}},
 					{Name: "ReloadPanel", Args: []introspect.Arg{{Name: "ok", Type: "b", Direction: "out"}, {Name: "diagnostic", Type: "s", Direction: "out"}}},
 					{Name: "ActivateView", Args: []introspect.Arg{{Name: "appId", Type: "s", Direction: "in"}, {Name: "viewId", Type: "s", Direction: "in"}}},
 					{Name: "CloseView", Args: []introspect.Arg{{Name: "appId", Type: "s", Direction: "in"}, {Name: "viewId", Type: "s", Direction: "in"}}},
+					{Name: "ActivateWorkspace", Args: []introspect.Arg{{Name: "workspaceId", Type: "s", Direction: "in"}, {Name: "operationKey", Type: "s", Direction: "in"}, {Name: "json", Type: "s", Direction: "out"}}},
+					{Name: "GetWorkspaceState", Args: []introspect.Arg{{Name: "workspaceId", Type: "s", Direction: "in"}, {Name: "json", Type: "s", Direction: "out"}}},
 				},
 				Signals: []introspect.Signal{
 					{Name: "PanelChanged", Args: []introspect.Arg{{Name: "revision", Type: "t"}}},
 					{Name: "PanelConfigChanged", Args: []introspect.Arg{{Name: "revision", Type: "t"}}},
 					{Name: "TreeChanged", Args: []introspect.Arg{{Name: "revision", Type: "t"}}},
+					{Name: "ShellActionRequested", Args: []introspect.Arg{{Name: "json", Type: "s"}}},
 				},
 			},
 			introspect.IntrospectData,
