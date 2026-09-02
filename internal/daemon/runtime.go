@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Homiakus/HWS/internal/adapters/shelldesktop"
@@ -19,6 +21,15 @@ import (
 	"github.com/Homiakus/HWS/internal/shellaction"
 )
 
+const workspaceStatesSchemaVersion uint32 = 1
+
+type WorkspaceStatesSnapshot struct {
+	Schema          uint32                `json:"schema"`
+	Revision        uint64                `json:"revision"`
+	CatalogRevision uint64                `json:"catalogRevision"`
+	States          []workspaceflow.State `json:"states"`
+}
+
 type Runtime struct {
 	*Hub
 	hierarchy          *contexttree.Manager
@@ -26,6 +37,10 @@ type Runtime struct {
 	shellActions       *shellaction.Broker
 	workspaceLifecycle *workspaceflow.Lifecycle
 	onTreeChanged      func(uint64)
+
+	workspaceStateMu       sync.RWMutex
+	workspaceStateRevision uint64
+	onWorkspaceChanged     func(string, uint64)
 }
 
 func NewRuntime(hub *Hub) *Runtime {
@@ -33,10 +48,11 @@ func NewRuntime(hub *Hub) *Runtime {
 		hub = NewHub(nil)
 	}
 	return &Runtime{
-		Hub:          hub,
-		hierarchy:    &contexttree.Manager{},
-		workspaces:   catalog.NewFile(),
-		shellActions: shellaction.NewBroker(3 * time.Second),
+		Hub:                    hub,
+		hierarchy:              &contexttree.Manager{},
+		workspaces:             catalog.NewFile(),
+		shellActions:           shellaction.NewBroker(3 * time.Second),
+		workspaceStateRevision: 1,
 	}
 }
 
@@ -162,7 +178,46 @@ func (r *Runtime) WorkspaceStateJSON(workspaceID string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	return r.workspaceStateJSON(ctx, id)
+	state, err := r.workspaceState(ctx, id, "")
+	if err != nil {
+		return "", err
+	}
+	return marshalWorkspaceState(state)
+}
+
+func (r *Runtime) WorkspaceStatesJSON() (string, error) {
+	if r.workspaceLifecycle == nil {
+		return "", errors.New("workspace lifecycle is unavailable")
+	}
+	catalogSnapshot := r.workspaces.Snapshot()
+	ids := make([]string, 0, len(catalogSnapshot.Active))
+	for id := range catalogSnapshot.Active {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	states := make([]workspaceflow.State, 0, len(ids))
+	for _, rawID := range ids {
+		state, err := r.workspaceState(ctx, domain.WorkspaceID(rawID), catalogSnapshot.Active[rawID])
+		if err != nil {
+			return "", err
+		}
+		states = append(states, state)
+	}
+
+	snapshot := WorkspaceStatesSnapshot{
+		Schema:          workspaceStatesSchemaVersion,
+		Revision:        r.workspaceRevision(),
+		CatalogRevision: catalogSnapshot.Revision,
+		States:          states,
+	}
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 func (r *Runtime) runWorkspaceMutation(workspaceID domain.WorkspaceID, timeout time.Duration, mutate func(context.Context) error) (string, error) {
@@ -174,14 +229,41 @@ func (r *Runtime) runWorkspaceMutation(workspaceID domain.WorkspaceID, timeout t
 	if err := mutate(ctx); err != nil {
 		return "", err
 	}
-	return r.workspaceStateJSON(ctx, workspaceID)
-}
-
-func (r *Runtime) workspaceStateJSON(ctx context.Context, workspaceID domain.WorkspaceID) (string, error) {
-	state, err := r.workspaceLifecycle.State(ctx, workspaceID)
+	state, err := r.workspaceState(ctx, workspaceID, "")
 	if err != nil {
 		return "", err
 	}
+	value, err := marshalWorkspaceState(state)
+	if err != nil {
+		return "", err
+	}
+	r.notifyWorkspaceChanged(string(workspaceID))
+	return value, nil
+}
+
+func (r *Runtime) workspaceState(ctx context.Context, workspaceID domain.WorkspaceID, definitionRevision string) (workspaceflow.State, error) {
+	state, err := r.workspaceLifecycle.State(ctx, workspaceID)
+	if err != nil {
+		return workspaceflow.State{}, err
+	}
+	if state.Status == "" {
+		state.Status = workspaceflow.StatusInactive
+	}
+	if state.WorkspaceID == "" {
+		state.WorkspaceID = string(workspaceID)
+	}
+	if state.DefinitionRevision == "" {
+		if definitionRevision == "" {
+			if desired, currentErr := r.workspaces.Current(workspaceID); currentErr == nil {
+				definitionRevision = desired.Revision
+			}
+		}
+		state.DefinitionRevision = definitionRevision
+	}
+	return state, nil
+}
+
+func marshalWorkspaceState(state workspaceflow.State) (string, error) {
 	data, err := json.Marshal(state)
 	if err != nil {
 		return "", err
@@ -211,6 +293,29 @@ func validateWorkspaceMutation(workspaceID, operationKey string) (domain.Workspa
 
 func (r *Runtime) SetTreeNotifier(notify func(uint64)) {
 	r.onTreeChanged = notify
+}
+
+func (r *Runtime) SetWorkspaceNotifier(notify func(string, uint64)) {
+	r.workspaceStateMu.Lock()
+	defer r.workspaceStateMu.Unlock()
+	r.onWorkspaceChanged = notify
+}
+
+func (r *Runtime) workspaceRevision() uint64 {
+	r.workspaceStateMu.RLock()
+	defer r.workspaceStateMu.RUnlock()
+	return r.workspaceStateRevision
+}
+
+func (r *Runtime) notifyWorkspaceChanged(workspaceID string) {
+	r.workspaceStateMu.Lock()
+	r.workspaceStateRevision++
+	revision := r.workspaceStateRevision
+	notify := r.onWorkspaceChanged
+	r.workspaceStateMu.Unlock()
+	if notify != nil {
+		notify(workspaceID, revision)
+	}
 }
 
 func (r *Runtime) TreeJSON() (string, error) {
@@ -256,6 +361,7 @@ func (r *Runtime) HealthJSON() (string, error) {
 	payload["workspaceDefinitions"] = workspaceSnapshot.DefinitionCount
 	payload["workspaceCatalogValid"] = r.workspaces.Valid()
 	payload["workspaceLifecycleReady"] = r.workspaceLifecycle != nil
+	payload["workspaceStateRevision"] = r.workspaceRevision()
 	if lastErr := r.workspaces.LastError(); lastErr != nil {
 		payload["workspaceCatalogError"] = lastErr.Error()
 	}
@@ -292,5 +398,26 @@ func (r *Runtime) RunHierarchyMaintenance(ctx context.Context, interval time.Dur
 }
 
 func (r *Runtime) RunWorkspaceMaintenance(ctx context.Context, interval time.Duration, report func(error)) {
-	r.workspaces.RunMaintenance(ctx, interval, report)
+	if interval <= 0 {
+		interval = time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			changed, err := r.workspaces.Poll()
+			if err != nil {
+				if report != nil {
+					report(err)
+				}
+				continue
+			}
+			if changed {
+				r.notifyWorkspaceChanged("")
+			}
+		}
+	}
 }

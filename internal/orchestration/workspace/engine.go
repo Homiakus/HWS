@@ -129,6 +129,9 @@ func (l *Lifecycle) Close(ctx context.Context, workspaceID domain.WorkspaceID, o
 func (l *Lifecycle) State(ctx context.Context, workspaceID domain.WorkspaceID) (State, error) {
 	var state State
 	if err := l.engine.Execution(string(workspaceID)).State(ctx, &state); err != nil {
+		if isExecutionNotFound(err) {
+			return State{Status: StatusInactive, WorkspaceID: string(workspaceID)}, nil
+		}
 		return State{}, err
 	}
 	return state, nil

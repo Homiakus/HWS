@@ -68,6 +68,7 @@ func (s *Service) Hello(clientProtocol uint32, clientInstance string) (uint32, s
 		"workspace.suspend":     "supported",
 		"workspace.close":       "supported",
 		"workspace.state":       "supported",
+		"workspace.states":      "supported",
 	})
 	return ipc.ProtocolVersion, s.serverInstance, s.revisionEpoch, string(capabilities), nil
 }
@@ -228,11 +229,13 @@ func introspectionNode() *introspect.Node {
 					{Name: "SuspendWorkspace", Args: []introspect.Arg{{Name: "workspaceId", Type: "s", Direction: "in"}, {Name: "json", Type: "s", Direction: "out"}}},
 					{Name: "CloseWorkspace", Args: []introspect.Arg{{Name: "workspaceId", Type: "s", Direction: "in"}, {Name: "operationKey", Type: "s", Direction: "in"}, {Name: "json", Type: "s", Direction: "out"}}},
 					{Name: "GetWorkspaceState", Args: []introspect.Arg{{Name: "workspaceId", Type: "s", Direction: "in"}, {Name: "json", Type: "s", Direction: "out"}}},
+					{Name: "GetWorkspaceStates", Args: []introspect.Arg{{Name: "json", Type: "s", Direction: "out"}}},
 				},
 				Signals: []introspect.Signal{
 					{Name: "PanelChanged", Args: []introspect.Arg{{Name: "revision", Type: "t"}}},
 					{Name: "PanelConfigChanged", Args: []introspect.Arg{{Name: "revision", Type: "t"}}},
 					{Name: "TreeChanged", Args: []introspect.Arg{{Name: "revision", Type: "t"}}},
+					{Name: "WorkspaceChanged", Args: []introspect.Arg{{Name: "workspaceId", Type: "s"}, {Name: "revision", Type: "t"}}},
 					{Name: "ShellActionRequested", Args: []introspect.Arg{{Name: "json", Type: "s"}}},
 				},
 			},

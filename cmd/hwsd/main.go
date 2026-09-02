@@ -74,6 +74,7 @@ func run() error {
 	defer dbusServer.Close()
 	hub.SetNotifiers(dbusServer.EmitPanelChanged, dbusServer.EmitPanelConfigChanged)
 	runtime.SetTreeNotifier(dbusServer.EmitTreeChanged)
+	runtime.SetWorkspaceNotifier(dbusServer.EmitWorkspaceChanged)
 	runtime.SetShellActionEmitter(dbusServer.EmitShellActionRequested)
 
 	mprisCollector, err := mpris.OpenSession(hub)

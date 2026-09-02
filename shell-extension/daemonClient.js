@@ -10,11 +10,13 @@ export class DaemonClient {
     constructor({
         onCardsChanged = null,
         onTreeChanged = null,
+        onWorkspaceStatesChanged = null,
         onShellAction = null,
         onAvailabilityChanged = null,
     } = {}) {
         this._onCardsChanged = onCardsChanged;
         this._onTreeChanged = onTreeChanged;
+        this._onWorkspaceStatesChanged = onWorkspaceStatesChanged;
         this._onShellAction = onShellAction;
         this._onAvailabilityChanged = onAvailabilityChanged;
         this._proxy = null;
@@ -22,9 +24,11 @@ export class DaemonClient {
         this._cancellable = new Gio.Cancellable();
         this._refreshSource = 0;
         this._treeRefreshSource = 0;
+        this._workspaceRefreshSource = 0;
         this._cards = [];
         this._render = null;
         this._tree = null;
+        this._workspaceStates = null;
         this._available = false;
         this._instance = GLib.uuid_string_random();
         this._connect();
@@ -40,6 +44,10 @@ export class DaemonClient {
 
     get tree() {
         return this._tree;
+    }
+
+    get workspaceStates() {
+        return this._workspaceStates;
     }
 
     get available() {
@@ -70,6 +78,8 @@ export class DaemonClient {
                         this.queueRefresh();
                     } else if (signalName === 'TreeChanged') {
                         this.queueTreeRefresh();
+                    } else if (signalName === 'WorkspaceChanged') {
+                        this.queueWorkspaceStatesRefresh();
                     } else if (signalName === 'ShellActionRequested') {
                         this._dispatchShellAction(parameters);
                     }
@@ -85,9 +95,11 @@ export class DaemonClient {
             this._cards = [];
             this._render = null;
             this._tree = null;
+            this._workspaceStates = null;
             this._setAvailable(false);
             this._onCardsChanged?.(this._cards, this._render);
             this._onTreeChanged?.(null);
+            this._onWorkspaceStatesChanged?.(null);
             return;
         }
         this._call('Hello', new GLib.Variant('(us)', [PROTOCOL_VERSION, this._instance]), values => {
@@ -99,6 +111,7 @@ export class DaemonClient {
             this._setAvailable(true);
             this.queueRefresh();
             this.queueTreeRefresh();
+            this.queueWorkspaceStatesRefresh();
         }, () => this._setAvailable(false));
     }
 
@@ -169,6 +182,16 @@ export class DaemonClient {
         });
     }
 
+    queueWorkspaceStatesRefresh() {
+        if (!this._available || !this._onWorkspaceStatesChanged || this._workspaceRefreshSource)
+            return;
+        this._workspaceRefreshSource = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 30, () => {
+            this._workspaceRefreshSource = 0;
+            this.refreshWorkspaceStates();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
     refresh() {
         if (!this._available || !this._onCardsChanged)
             return;
@@ -194,6 +217,22 @@ export class DaemonClient {
                 this._onTreeChanged?.(this._tree);
             } catch (_error) {
                 // Keep the last valid tree on malformed daemon output.
+            }
+        });
+    }
+
+    refreshWorkspaceStates() {
+        if (!this._available || !this._onWorkspaceStatesChanged)
+            return;
+        this._call('GetWorkspaceStates', null, values => {
+            try {
+                const payload = JSON.parse(values[0]);
+                if (!payload || typeof payload !== 'object')
+                    return;
+                this._workspaceStates = payload;
+                this._onWorkspaceStatesChanged?.(payload);
+            } catch (_error) {
+                // Keep the last valid workspace-state snapshot.
             }
         });
     }
@@ -236,36 +275,68 @@ export class DaemonClient {
     }
 
     activateWorkspace(workspaceID, done = null, failed = null) {
-        if (typeof workspaceID !== 'string' || !workspaceID.trim()) {
-            failed?.(new Error('workspace id is required'));
+        this._workspaceMutation('ActivateWorkspace', 'activate', workspaceID, done, failed);
+    }
+
+    recoverWorkspace(workspaceID, done = null, failed = null) {
+        this._workspaceMutation('RecoverWorkspace', 'recover', workspaceID, done, failed);
+    }
+
+    resumeWorkspace(workspaceID, done = null, failed = null) {
+        this._workspaceMutation('ResumeWorkspace', 'resume', workspaceID, done, failed);
+    }
+
+    suspendWorkspace(workspaceID, done = null, failed = null) {
+        const id = this._workspaceID(workspaceID, failed);
+        if (!id)
             return;
-        }
-        const operationKey = `shell:${this._instance}:${GLib.uuid_string_random()}`;
         this._call(
-            'ActivateWorkspace',
-            new GLib.Variant('(ss)', [workspaceID.trim(), operationKey]),
-            values => {
-                try {
-                    const state = JSON.parse(values[0]);
-                    done?.(state && typeof state === 'object' ? state : null);
-                } catch (error) {
-                    failed?.(error);
-                }
-            },
+            'SuspendWorkspace',
+            new GLib.Variant('(s)', [id]),
+            values => this._decodeWorkspaceState(values, done, failed),
+            failed,
+            7000
+        );
+    }
+
+    closeWorkspace(workspaceID, done = null, failed = null) {
+        this._workspaceMutation('CloseWorkspace', 'close', workspaceID, done, failed);
+    }
+
+    _workspaceMutation(method, action, workspaceID, done, failed) {
+        const id = this._workspaceID(workspaceID, failed);
+        if (!id)
+            return;
+        const operationKey = `shell:${action}:${this._instance}:${GLib.uuid_string_random()}`;
+        this._call(
+            method,
+            new GLib.Variant('(ss)', [id, operationKey]),
+            values => this._decodeWorkspaceState(values, done, failed),
             failed,
             22000
         );
     }
 
+    _workspaceID(workspaceID, failed) {
+        if (typeof workspaceID !== 'string' || !workspaceID.trim()) {
+            failed?.(new Error('workspace id is required'));
+            return '';
+        }
+        return workspaceID.trim();
+    }
+
+    _decodeWorkspaceState(values, done, failed) {
+        try {
+            const state = JSON.parse(values[0]);
+            done?.(state && typeof state === 'object' ? state : null);
+        } catch (error) {
+            failed?.(error);
+        }
+    }
+
     getWorkspaceState(workspaceID, done = null, failed = null) {
-        this._call('GetWorkspaceState', new GLib.Variant('(s)', [workspaceID]), values => {
-            try {
-                const state = JSON.parse(values[0]);
-                done?.(state && typeof state === 'object' ? state : null);
-            } catch (error) {
-                failed?.(error);
-            }
-        }, failed);
+        this._call('GetWorkspaceState', new GLib.Variant('(s)', [workspaceID]), values =>
+            this._decodeWorkspaceState(values, done, failed), failed);
     }
 
     getHealth(done) {
@@ -305,6 +376,10 @@ export class DaemonClient {
             GLib.source_remove(this._treeRefreshSource);
             this._treeRefreshSource = 0;
         }
+        if (this._workspaceRefreshSource) {
+            GLib.source_remove(this._workspaceRefreshSource);
+            this._workspaceRefreshSource = 0;
+        }
         this._cancellable.cancel();
         if (this._proxy) {
             for (const id of this._signals)
@@ -315,6 +390,8 @@ export class DaemonClient {
         this._cards = [];
         this._render = null;
         this._tree = null;
+        this._workspaceStates = null;
+        this._onWorkspaceStatesChanged = null;
         this._onShellAction = null;
     }
 }

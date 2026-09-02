@@ -55,13 +55,17 @@ func TestGoClientRoundTrip(t *testing.T) {
 	if os.Getenv("DBUS_SESSION_BUS_ADDRESS") == "" {
 		t.Skip("requires a session bus; CI runs this test under dbus-run-session")
 	}
-	backend := &fakeBackend{
-		panel:  `{"revision":9,"cards":[]}`,
-		spec:   `{"revision":2,"valid":true}`,
-		health: `{"status":"ok","applications":1}`,
-		tree:   `{"schema":1,"revision":3,"rootId":"root","nodes":[]}`,
-		path:   `[{"id":"root","title":"Home"}]`,
-		app:    `{"appId":"code.desktop"}`,
+	backend := &workspaceFakeBackend{
+		fakeBackend: fakeBackend{
+			panel:  `{"revision":9,"cards":[]}`,
+			spec:   `{"revision":2,"valid":true}`,
+			health: `{"status":"ok","applications":1}`,
+			tree:   `{"schema":1,"revision":3,"rootId":"root","nodes":[]}`,
+			path:   `[{"id":"root","title":"Home"}]`,
+			app:    `{"appId":"code.desktop"}`,
+		},
+		state:  `{"workspaceId":"dev","status":"inactive"}`,
+		states: `{"schema":1,"revision":4,"catalogRevision":2,"states":[{"workspaceId":"dev","status":"inactive"}]}`,
 	}
 	server, err := OpenSession(backend)
 	if err != nil {
@@ -77,7 +81,7 @@ func TestGoClientRoundTrip(t *testing.T) {
 	if client.ServerInstance() == "" || client.RevisionEpoch() == "" {
 		t.Fatal("client handshake did not preserve server cache identity")
 	}
-	if client.Capabilities()["health"] != "supported" || client.Capabilities()["tree.read"] != "supported" {
+	if client.Capabilities()["health"] != "supported" || client.Capabilities()["tree.read"] != "supported" || client.Capabilities()["workspace.states"] != "supported" {
 		t.Fatalf("required capabilities missing: %#v", client.Capabilities())
 	}
 	if got, err := client.HealthJSON(); err != nil || got != backend.health {
@@ -97,5 +101,11 @@ func TestGoClientRoundTrip(t *testing.T) {
 	}
 	if got, err := client.ApplicationJSON("code.desktop"); err != nil || got != backend.app {
 		t.Fatalf("app=%q err=%v", got, err)
+	}
+	if got, err := client.WorkspaceStateJSON("dev"); err != nil || got != backend.state {
+		t.Fatalf("workspace state=%q err=%v", got, err)
+	}
+	if got, err := client.WorkspaceStatesJSON(); err != nil || got != backend.states {
+		t.Fatalf("workspace states=%q err=%v", got, err)
 	}
 }

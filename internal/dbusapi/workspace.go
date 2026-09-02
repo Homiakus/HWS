@@ -12,6 +12,7 @@ type workspaceBackend interface {
 	SuspendWorkspaceJSON(string) (string, error)
 	CloseWorkspaceJSON(string, string) (string, error)
 	WorkspaceStateJSON(string) (string, error)
+	WorkspaceStatesJSON() (string, error)
 	CompleteShellActionJSON(string) error
 }
 
@@ -69,6 +70,15 @@ func (s *Service) GetWorkspaceState(workspaceID string) (string, *dbus.Error) {
 	return value, asDBusError(callErr)
 }
 
+func (s *Service) GetWorkspaceStates() (string, *dbus.Error) {
+	backend, err := s.workspaceBackend()
+	if err != nil {
+		return "", err
+	}
+	value, callErr := backend.WorkspaceStatesJSON()
+	return value, asDBusError(callErr)
+}
+
 func (s *Service) CompleteShellAction(payload string) *dbus.Error {
 	backend, err := s.workspaceBackend()
 	if err != nil {
@@ -90,4 +100,8 @@ func (s *Server) EmitShellActionRequested(payload string) {
 		return
 	}
 	s.emit("ShellActionRequested", payload)
+}
+
+func (s *Server) EmitWorkspaceChanged(workspaceID string, revision uint64) {
+	s.emit("WorkspaceChanged", workspaceID, revision)
 }

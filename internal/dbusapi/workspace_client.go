@@ -30,6 +30,10 @@ func (c *Client) WorkspaceStateJSON(workspaceID string) (string, error) {
 	return c.stringArgCall("GetWorkspaceState", workspaceID)
 }
 
+func (c *Client) WorkspaceStatesJSON() (string, error) {
+	return c.stringCall("GetWorkspaceStates")
+}
+
 func (c *Client) CompleteShellAction(payload string) error {
 	if err := c.object.Call(ipc.InterfaceName+".CompleteShellAction", 0, payload).Err; err != nil {
 		return fmt.Errorf("CompleteShellAction: %w", err)

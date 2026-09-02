@@ -54,26 +54,38 @@ func TestSessionRoundTripWorkspaceActivationAndClose(t *testing.T) {
 	}
 	defer server.Close()
 	runtime.SetShellActionEmitter(server.EmitShellActionRequested)
+	runtime.SetWorkspaceNotifier(server.EmitWorkspaceChanged)
 
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	match := []dbus.MatchOption{
+	shellMatch := []dbus.MatchOption{
 		dbus.WithMatchObjectPath(dbus.ObjectPath(ipc.ObjectPath)),
 		dbus.WithMatchInterface(ipc.InterfaceName),
 		dbus.WithMatchMember("ShellActionRequested"),
 	}
-	if err := conn.AddMatchSignal(match...); err != nil {
+	workspaceMatch := []dbus.MatchOption{
+		dbus.WithMatchObjectPath(dbus.ObjectPath(ipc.ObjectPath)),
+		dbus.WithMatchInterface(ipc.InterfaceName),
+		dbus.WithMatchMember("WorkspaceChanged"),
+	}
+	if err := conn.AddMatchSignal(shellMatch...); err != nil {
 		t.Fatal(err)
 	}
-	defer conn.RemoveMatchSignal(match...)
+	defer conn.RemoveMatchSignal(shellMatch...)
+	if err := conn.AddMatchSignal(workspaceMatch...); err != nil {
+		t.Fatal(err)
+	}
+	defer conn.RemoveMatchSignal(workspaceMatch...)
 
-	signals := make(chan *dbus.Signal, 8)
+	signals := make(chan *dbus.Signal, 12)
 	conn.Signal(signals)
 	defer conn.RemoveSignal(signals)
 	obj := conn.Object(ipc.BusName, dbus.ObjectPath(ipc.ObjectPath))
+
+	initialRevision := assertWorkspaceStates(t, obj, "inactive")
 
 	activateResult := asyncWorkspaceCall(obj, "ActivateWorkspace", "dev", "integration:dev:v1:activate")
 	ensure := waitShellAction(t, signals)
@@ -87,6 +99,13 @@ func TestSessionRoundTripWorkspaceActivationAndClose(t *testing.T) {
 	}
 	completeShellAction(t, obj, ensure, true, true)
 	assertWorkspaceResult(t, activateResult, "active")
+	activeRevision := waitWorkspaceChanged(t, signals, "dev")
+	if activeRevision <= initialRevision {
+		t.Fatalf("active revision=%d initial=%d", activeRevision, initialRevision)
+	}
+	if got := assertWorkspaceStates(t, obj, "active"); got != activeRevision {
+		t.Fatalf("batch revision=%d signal revision=%d", got, activeRevision)
+	}
 
 	closeResult := asyncWorkspaceCall(obj, "CloseWorkspace", "dev", "integration:dev:v1:close")
 	closeRequest := waitShellAction(t, signals)
@@ -100,6 +119,13 @@ func TestSessionRoundTripWorkspaceActivationAndClose(t *testing.T) {
 	}
 	completeShellAction(t, obj, closeRequest, true, true)
 	assertWorkspaceResult(t, closeResult, "inactive")
+	closedRevision := waitWorkspaceChanged(t, signals, "dev")
+	if closedRevision <= activeRevision {
+		t.Fatalf("closed revision=%d active=%d", closedRevision, activeRevision)
+	}
+	if got := assertWorkspaceStates(t, obj, "inactive"); got != closedRevision {
+		t.Fatalf("batch revision=%d signal revision=%d", got, closedRevision)
+	}
 
 	var state string
 	if err := obj.Call(ipc.InterfaceName+".GetWorkspaceState", 0, "dev").Store(&state); err != nil {
@@ -125,24 +151,75 @@ func asyncWorkspaceCall(obj dbus.BusObject, method string, args ...any) <-chan w
 
 func waitShellAction(t *testing.T, signals <-chan *dbus.Signal) shellaction.Request {
 	t.Helper()
-	select {
-	case signal := <-signals:
-		if signal == nil || signal.Name != ipc.InterfaceName+".ShellActionRequested" || len(signal.Body) != 1 {
-			t.Fatalf("unexpected signal: %#v", signal)
+	for {
+		select {
+		case signal := <-signals:
+			if signal == nil || signal.Name != ipc.InterfaceName+".ShellActionRequested" {
+				continue
+			}
+			if len(signal.Body) != 1 {
+				t.Fatalf("unexpected signal body: %#v", signal)
+			}
+			payload, ok := signal.Body[0].(string)
+			if !ok {
+				t.Fatalf("unexpected shell action body: %#v", signal.Body)
+			}
+			var request shellaction.Request
+			if err := json.Unmarshal([]byte(payload), &request); err != nil {
+				t.Fatal(err)
+			}
+			return request
+		case <-time.After(3 * time.Second):
+			t.Fatal("timed out waiting for ShellActionRequested")
+			return shellaction.Request{}
 		}
-		payload, ok := signal.Body[0].(string)
-		if !ok {
-			t.Fatalf("unexpected shell action body: %#v", signal.Body)
-		}
-		var request shellaction.Request
-		if err := json.Unmarshal([]byte(payload), &request); err != nil {
-			t.Fatal(err)
-		}
-		return request
-	case <-time.After(3 * time.Second):
-		t.Fatal("timed out waiting for ShellActionRequested")
-		return shellaction.Request{}
 	}
+}
+
+func waitWorkspaceChanged(t *testing.T, signals <-chan *dbus.Signal, wantID string) uint64 {
+	t.Helper()
+	for {
+		select {
+		case signal := <-signals:
+			if signal == nil || signal.Name != ipc.InterfaceName+".WorkspaceChanged" {
+				continue
+			}
+			if len(signal.Body) != 2 {
+				t.Fatalf("unexpected WorkspaceChanged body: %#v", signal.Body)
+			}
+			workspaceID, ok := signal.Body[0].(string)
+			if !ok || workspaceID != wantID {
+				t.Fatalf("workspace changed id=%#v want=%q", signal.Body[0], wantID)
+			}
+			revision, ok := signal.Body[1].(uint64)
+			if !ok {
+				t.Fatalf("workspace changed revision=%#v", signal.Body[1])
+			}
+			return revision
+		case <-time.After(3 * time.Second):
+			t.Fatal("timed out waiting for WorkspaceChanged")
+			return 0
+		}
+	}
+}
+
+func assertWorkspaceStates(t *testing.T, obj dbus.BusObject, wantStatus string) uint64 {
+	t.Helper()
+	var raw string
+	if err := obj.Call(ipc.InterfaceName+".GetWorkspaceStates", 0).Store(&raw); err != nil {
+		t.Fatalf("GetWorkspaceStates: %v", err)
+	}
+	var snapshot daemon.WorkspaceStatesSnapshot
+	if err := json.Unmarshal([]byte(raw), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Schema != 1 || len(snapshot.States) != 1 {
+		t.Fatalf("unexpected workspace states snapshot: %s", raw)
+	}
+	if snapshot.States[0].WorkspaceID != "dev" || snapshot.States[0].Status != wantStatus {
+		t.Fatalf("unexpected workspace state snapshot: %s", raw)
+	}
+	return snapshot.Revision
 }
 
 func completeShellAction(t *testing.T, obj dbus.BusObject, request shellaction.Request, success, changed bool) {
