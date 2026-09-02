@@ -52,8 +52,10 @@ jobs:
           node --input-type=module --check < shell-extension/daemonClient.js
           node --input-type=module --check < shell-extension/homeGrid.js
           node --input-type=module --check < shell-extension/homeGridModel.js
-      - name: Home Grid model tests
-        run: node --test shell-extension/homeGridModel.test.mjs
+          node --input-type=module --check < shell-extension/shellActionModel.js
+          node --input-type=module --check < shell-extension/shellExecutor.js
+      - name: Shell model tests
+        run: node --test shell-extension/homeGridModel.test.mjs shell-extension/shellActionModel.test.mjs
       - name: JSON manifests
         shell: bash
         run: |

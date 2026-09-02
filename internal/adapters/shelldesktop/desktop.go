@@ -158,8 +158,41 @@ func (d *Desktop) Close(ctx context.Context, desired domain.DesiredState, resour
 			return fmt.Errorf("shell desktop: close %s window %s failed (%s): %s", resource.ID, windowID, result.Code, result.Message)
 		}
 	}
+	if err := d.waitWindowsAbsent(ctx, resource.DesktopAppID, windowIDs); err != nil {
+		return fmt.Errorf("shell desktop: close %s did not converge: %w", resource.ID, err)
+	}
 	d.markManaged(desired.WorkspaceID, resource.ID, false)
 	return nil
+}
+
+func (d *Desktop) waitWindowsAbsent(ctx context.Context, desktopAppID string, windowIDs []string) error {
+	if len(windowIDs) == 0 {
+		return nil
+	}
+	target := make(map[string]struct{}, len(windowIDs))
+	for _, id := range windowIDs {
+		target[id] = struct{}{}
+	}
+	ticker := time.NewTicker(d.poll)
+	defer ticker.Stop()
+	for {
+		remaining := 0
+		if app, ok := findApplication(d.reader.SurfaceSnapshot(), desktopAppID); ok {
+			for _, window := range app.Windows {
+				if _, tracked := target[string(window.ID)]; tracked {
+					remaining++
+				}
+			}
+		}
+		if remaining == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func (d *Desktop) markManaged(workspaceID domain.WorkspaceID, resourceID domain.ResourceID, value bool) {

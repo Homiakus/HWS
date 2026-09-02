@@ -14,6 +14,7 @@ import {
     searchTree,
     selectPathNode,
 } from './homeGridModel.js';
+import {ShellExecutor} from './shellExecutor.js';
 
 const HomeGridIndicator = GObject.registerClass(
 class HomeGridIndicator extends PanelMenu.Button {
@@ -37,8 +38,9 @@ class HomeGridIndicator extends PanelMenu.Button {
 });
 
 class HomeGridDialog extends ModalDialog.ModalDialog {
-    constructor() {
+    constructor(onActivateWorkspace) {
         super({styleClass: 'hws-home-modal', destroyOnClose: false});
+        this._onActivateWorkspace = onActivateWorkspace;
         this._available = false;
         this._model = null;
         this._path = [];
@@ -47,6 +49,8 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
         this._searchPaths = [];
         this._statusText = '';
         this._statusError = false;
+        this._activatingWorkspace = '';
+        this._activationToken = 0;
 
         this._root = new St.BoxLayout({
             vertical: true,
@@ -145,6 +149,10 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
 
     setAvailable(available) {
         this._available = Boolean(available);
+        if (!this._available) {
+            this._activationToken++;
+            this._activatingWorkspace = '';
+        }
         this._render();
     }
 
@@ -237,6 +245,7 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
                 });
                 button.accessible_name = `${node.title}, ${node.kind}`;
                 button.toggle_style_class_name('selected', row.selectedId === node.id);
+                button.toggle_style_class_name('activating', Boolean(node.workspaceId) && node.workspaceId === this._activatingWorkspace);
                 button.connect('clicked', () => this._choose(rowIndex, itemIndex));
                 button.connect('key-press-event', (_actor, event) =>
                     this._handleTileKey(event, rowIndex, itemIndex));
@@ -351,10 +360,51 @@ class HomeGridDialog extends ModalDialog.ModalDialog {
         this._path = selectPathNode(this._model, projection.path, rowIndex, node.id);
         const hasChildren = (this._model.children.get(node.id)?.length || 0) > 0;
         this._render();
-        if (hasChildren)
+        if (hasChildren) {
             this._focusTile(rowIndex + 1, 0);
-        else
+        } else if (node.workspaceId) {
+            this._activateWorkspace(node);
+        } else {
             this._focusSelected(rowIndex, node.id);
+        }
+    }
+
+    _activateWorkspace(node) {
+        if (!this._onActivateWorkspace) {
+            this._setStatus(`Workspace activation is unavailable for ${node.title}`, true);
+            return;
+        }
+        if (this._activatingWorkspace === node.workspaceId)
+            return;
+
+        const token = ++this._activationToken;
+        this._activatingWorkspace = node.workspaceId;
+        this._render();
+        this._setStatus(`Activating ${node.title}…`, false);
+
+        this._onActivateWorkspace(
+            node.workspaceId,
+            state => {
+                if (token !== this._activationToken)
+                    return;
+                this._activatingWorkspace = '';
+                const status = typeof state?.status === 'string' ? state.status : 'unknown';
+                if (status === 'active') {
+                    this.close(global.get_current_time());
+                    return;
+                }
+                const failure = state?.lastFailureCode ? ` · ${state.lastFailureCode}` : '';
+                this._render();
+                this._setStatus(`Workspace ${node.title}: ${status}${failure}`, status !== 'degraded');
+            },
+            error => {
+                if (token !== this._activationToken)
+                    return;
+                this._activatingWorkspace = '';
+                this._render();
+                this._setStatus(`Activation failed: ${error?.message || String(error)}`, true);
+            }
+        );
     }
 
     _handleTileKey(event, rowIndex, itemIndex) {
@@ -440,6 +490,10 @@ class HomeGridController {
         this._available = false;
         this._dialog = null;
         this._open = false;
+        this._executor = new ShellExecutor(result => {
+            this._client?.completeShellAction(result, null, error =>
+                console.error(`HWS shell action completion failed: ${error?.message || error}`));
+        });
 
         this._client = new DaemonClient({
             onAvailabilityChanged: available => {
@@ -452,6 +506,7 @@ class HomeGridController {
                 this._tree = tree;
                 this._dialog?.setTree(tree);
             },
+            onShellAction: action => this._executor?.handle(action),
         });
 
         this._indicator = new HomeGridIndicator(() => this.toggle());
@@ -461,7 +516,8 @@ class HomeGridController {
     _ensureDialog() {
         if (this._dialog)
             return this._dialog;
-        this._dialog = new HomeGridDialog();
+        this._dialog = new HomeGridDialog((workspaceID, done, failed) =>
+            this._client.activateWorkspace(workspaceID, done, failed));
         this._dialog.connect('opened', () => {
             this._open = true;
         });
@@ -497,6 +553,8 @@ class HomeGridController {
         this._indicator = null;
         this._client?.destroy();
         this._client = null;
+        this._executor?.destroy();
+        this._executor = null;
     }
 }
 
