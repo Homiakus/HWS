@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Homiakus/HWS/internal/daemon"
+	"github.com/Homiakus/HWS/internal/domain"
 	"github.com/Homiakus/HWS/internal/ipc"
 	"github.com/Homiakus/HWS/internal/shellaction"
 	"github.com/godbus/dbus/v5"
@@ -31,7 +32,12 @@ func TestSessionRoundTripWorkspaceActivationAndClose(t *testing.T) {
       "kind":"desktop_app",
       "required":true,
       "ownership":"managed",
-      "desktopAppId":"dev.zed.Zed.desktop"
+      "desktopAppId":"dev.zed.Zed.desktop",
+      "placement":{
+        "monitorRole":"primary",
+        "workspace":0,
+        "rect":{"x":0.1,"y":0.1,"width":0.8,"height":0.8}
+      }
     }]
   }]
 }`
@@ -80,7 +86,7 @@ func TestSessionRoundTripWorkspaceActivationAndClose(t *testing.T) {
 	}
 	defer conn.RemoveMatchSignal(workspaceMatch...)
 
-	signals := make(chan *dbus.Signal, 12)
+	signals := make(chan *dbus.Signal, 16)
 	conn.Signal(signals)
 	defer conn.RemoveSignal(signals)
 	obj := conn.Object(ipc.BusName, dbus.ObjectPath(ipc.ObjectPath))
@@ -93,11 +99,31 @@ func TestSessionRoundTripWorkspaceActivationAndClose(t *testing.T) {
 		t.Fatalf("unexpected ensure request: %#v", ensure)
 	}
 
-	snapshot := `{"schema":1,"revision":1,"capturedAt":"` + time.Now().UTC().Format(time.RFC3339Nano) + `","apps":[{"appId":"dev.zed.Zed.desktop","name":"Zed","desktopAppId":"dev.zed.Zed.desktop","windows":[{"id":"window:7","title":"HWS"}]}]}`
-	if err := obj.Call(ipc.InterfaceName+".SubmitShellSnapshot", 0, snapshot).Err; err != nil {
-		t.Fatalf("SubmitShellSnapshot active: %v", err)
+	initialFrame := domain.LogicalRect{X: 10, Y: 40, Width: 900, Height: 700}
+	if err := submitWorkspaceShellSnapshot(t, obj, 1, initialFrame, true); err != nil {
+		t.Fatal(err)
 	}
 	completeShellAction(t, obj, ensure, true, true)
+
+	place := waitShellAction(t, signals)
+	if place.Kind != shellaction.KindPlaceWindow || place.WindowID != "window:7" {
+		t.Fatalf("unexpected placement request: %#v", place)
+	}
+	if place.TopologyRevision != "topology:integration" || place.MonitorRef != "monitor:0" || place.MonitorIndex != 0 || place.TargetWorkspace != 0 {
+		t.Fatalf("unexpected placement target: %#v", place)
+	}
+	wantRect := domain.LogicalRect{X: 192, Y: 108, Width: 1536, Height: 864}
+	if place.Rect != wantRect {
+		t.Fatalf("placement rect=%#v want=%#v", place.Rect, wantRect)
+	}
+
+	// Shell acceptance is not convergence. Publish the authoritative post-move
+	// frame first, then complete the action. Axiom can become Active only after
+	// the desktop adapter re-observes this exact topology/placement.
+	if err := submitWorkspaceShellSnapshot(t, obj, 2, wantRect, true); err != nil {
+		t.Fatal(err)
+	}
+	completeShellAction(t, obj, place, true, true)
 	assertWorkspaceResult(t, activateResult, "active")
 	activeRevision := waitWorkspaceChanged(t, signals, "dev")
 	if activeRevision <= initialRevision {
@@ -113,9 +139,8 @@ func TestSessionRoundTripWorkspaceActivationAndClose(t *testing.T) {
 		t.Fatalf("unexpected close request: %#v", closeRequest)
 	}
 
-	emptySnapshot := `{"schema":1,"revision":2,"capturedAt":"` + time.Now().UTC().Format(time.RFC3339Nano) + `","apps":[]}`
-	if err := obj.Call(ipc.InterfaceName+".SubmitShellSnapshot", 0, emptySnapshot).Err; err != nil {
-		t.Fatalf("SubmitShellSnapshot closed: %v", err)
+	if err := submitWorkspaceShellSnapshot(t, obj, 3, domain.LogicalRect{}, false); err != nil {
+		t.Fatal(err)
 	}
 	completeShellAction(t, obj, closeRequest, true, true)
 	assertWorkspaceResult(t, closeResult, "inactive")
@@ -132,6 +157,81 @@ func TestSessionRoundTripWorkspaceActivationAndClose(t *testing.T) {
 		t.Fatalf("GetWorkspaceState: %v", err)
 	}
 	assertWorkspaceJSONStatus(t, state, "inactive")
+}
+
+func submitWorkspaceShellSnapshot(t *testing.T, obj dbus.BusObject, revision uint64, frame domain.LogicalRect, includeWindow bool) error {
+	t.Helper()
+	type monitor struct {
+		Ref      string             `json:"ref"`
+		Index    int                `json:"index"`
+		Primary  bool               `json:"primary"`
+		Scale    float64            `json:"scale"`
+		Geometry domain.LogicalRect `json:"geometry"`
+		WorkArea domain.LogicalRect `json:"workArea"`
+	}
+	type topology struct {
+		Revision          string    `json:"revision"`
+		PrimaryMonitorRef string    `json:"primaryMonitorRef"`
+		Monitors          []monitor `json:"monitors"`
+	}
+	type window struct {
+		ID          string             `json:"id"`
+		Title       string             `json:"title"`
+		WorkspaceID string             `json:"workspaceId"`
+		MonitorRef  string             `json:"monitorRef"`
+		Frame       domain.LogicalRect `json:"frame"`
+	}
+	type application struct {
+		AppID        string   `json:"appId"`
+		Name         string   `json:"name"`
+		DesktopAppID string   `json:"desktopAppId"`
+		Windows      []window `json:"windows"`
+	}
+	payload := struct {
+		Schema     uint32        `json:"schema"`
+		Revision   uint64        `json:"revision"`
+		CapturedAt time.Time     `json:"capturedAt"`
+		Topology   topology      `json:"topology"`
+		Apps       []application `json:"apps"`
+	}{
+		Schema:     1,
+		Revision:   revision,
+		CapturedAt: time.Now().UTC(),
+		Topology: topology{
+			Revision:          "topology:integration",
+			PrimaryMonitorRef: "monitor:0",
+			Monitors: []monitor{{
+				Ref:      "monitor:0",
+				Index:    0,
+				Primary:  true,
+				Scale:    1.5,
+				Geometry: domain.LogicalRect{X: 0, Y: 0, Width: 1920, Height: 1080},
+				WorkArea: domain.LogicalRect{X: 0, Y: 0, Width: 1920, Height: 1080},
+			}},
+		},
+	}
+	if includeWindow {
+		payload.Apps = []application{{
+			AppID:        "dev.zed.Zed.desktop",
+			Name:         "Zed",
+			DesktopAppID: "dev.zed.Zed.desktop",
+			Windows: []window{{
+				ID:          "window:7",
+				Title:       "HWS",
+				WorkspaceID: "workspace:0",
+				MonitorRef:  "monitor:0",
+				Frame:       frame,
+			}},
+		}}
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	if err := obj.Call(ipc.InterfaceName+".SubmitShellSnapshot", 0, string(data)).Err; err != nil {
+		return err
+	}
+	return nil
 }
 
 type workspaceCallResult struct {

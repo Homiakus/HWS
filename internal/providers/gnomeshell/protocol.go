@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Homiakus/HWS/internal/domain"
 	"github.com/Homiakus/HWS/internal/providers"
 	"github.com/Homiakus/HWS/internal/surface"
 )
@@ -20,7 +21,23 @@ type Snapshot struct {
 	Schema     uint32        `json:"schema"`
 	Revision   uint64        `json:"revision"`
 	CapturedAt time.Time     `json:"capturedAt"`
+	Topology   Topology      `json:"topology,omitempty"`
 	Apps       []Application `json:"apps"`
+}
+
+type Topology struct {
+	Revision          string    `json:"revision"`
+	PrimaryMonitorRef string    `json:"primaryMonitorRef"`
+	Monitors          []Monitor `json:"monitors"`
+}
+
+type Monitor struct {
+	Ref      string             `json:"ref"`
+	Index    int                `json:"index"`
+	Primary  bool               `json:"primary,omitempty"`
+	Scale    float64            `json:"scale"`
+	Geometry domain.LogicalRect `json:"geometry"`
+	WorkArea domain.LogicalRect `json:"workArea"`
 }
 
 type Application struct {
@@ -34,14 +51,15 @@ type Application struct {
 }
 
 type Window struct {
-	ID          string            `json:"id"`
-	Title       string            `json:"title"`
-	WorkspaceID string            `json:"workspaceId,omitempty"`
-	MonitorRef  string            `json:"monitorRef,omitempty"`
-	Focused     bool              `json:"focused,omitempty"`
-	Minimized   bool              `json:"minimized,omitempty"`
-	MRU         uint64            `json:"mru,omitempty"`
-	Attention   surface.Attention `json:"attention,omitempty"`
+	ID          string             `json:"id"`
+	Title       string             `json:"title"`
+	WorkspaceID string             `json:"workspaceId,omitempty"`
+	MonitorRef  string             `json:"monitorRef,omitempty"`
+	Frame       domain.LogicalRect `json:"frame,omitempty"`
+	Focused     bool               `json:"focused,omitempty"`
+	Minimized   bool               `json:"minimized,omitempty"`
+	MRU         uint64             `json:"mru,omitempty"`
+	Attention   surface.Attention  `json:"attention,omitempty"`
 }
 
 func Decode(data []byte) (Snapshot, error) {
@@ -65,6 +83,11 @@ func (s Snapshot) Validate() error {
 	if s.CapturedAt.IsZero() {
 		return errors.New("GNOME Shell capturedAt is required")
 	}
+	if s.Topology.Revision != "" {
+		if err := s.Topology.Validate(); err != nil {
+			return err
+		}
+	}
 
 	apps := map[string]struct{}{}
 	windows := map[string]struct{}{}
@@ -85,12 +108,48 @@ func (s Snapshot) Validate() error {
 				return fmt.Errorf("duplicate GNOME Shell window %q", window.ID)
 			}
 			windows[window.ID] = struct{}{}
+			if window.Frame != (domain.LogicalRect{}) && !window.Frame.Valid() {
+				return fmt.Errorf("GNOME Shell window %q has invalid frame", window.ID)
+			}
 			switch window.Attention {
 			case "", surface.AttentionNormal, surface.AttentionWanted, surface.AttentionUrgent:
 			default:
 				return fmt.Errorf("GNOME Shell window %q has invalid attention %q", window.ID, window.Attention)
 			}
 		}
+	}
+	return nil
+}
+
+func (t Topology) Validate() error {
+	if strings.TrimSpace(t.Revision) == "" {
+		return errors.New("GNOME Shell topology revision is required")
+	}
+	if len(t.Monitors) == 0 {
+		return errors.New("GNOME Shell topology requires at least one monitor")
+	}
+	seen := make(map[string]struct{}, len(t.Monitors))
+	primaryCount := 0
+	for _, monitor := range t.Monitors {
+		if strings.TrimSpace(monitor.Ref) == "" {
+			return errors.New("GNOME Shell monitor ref is required")
+		}
+		if monitor.Index < 0 || monitor.Scale <= 0 || !monitor.Geometry.Valid() || !monitor.WorkArea.Valid() {
+			return fmt.Errorf("GNOME Shell monitor %q is invalid", monitor.Ref)
+		}
+		if _, ok := seen[monitor.Ref]; ok {
+			return fmt.Errorf("duplicate GNOME Shell monitor %q", monitor.Ref)
+		}
+		seen[monitor.Ref] = struct{}{}
+		if monitor.Primary {
+			primaryCount++
+		}
+	}
+	if primaryCount != 1 {
+		return fmt.Errorf("GNOME Shell topology requires exactly one primary monitor, got %d", primaryCount)
+	}
+	if _, ok := seen[t.PrimaryMonitorRef]; !ok {
+		return fmt.Errorf("GNOME Shell primary monitor %q is unavailable", t.PrimaryMonitorRef)
 	}
 	return nil
 }

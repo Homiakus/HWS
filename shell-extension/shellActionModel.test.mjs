@@ -19,6 +19,22 @@ function ensureAction() {
     };
 }
 
+function placementAction() {
+    return {
+        schema: 1,
+        id: 'request-place',
+        kind: ShellActionKind.PLACE_WINDOW,
+        workspaceId: 'dev',
+        resourceId: 'editor',
+        windowId: 'window:42',
+        topologyRevision: 'topology:abc',
+        monitorRef: 'monitor:1',
+        monitorIndex: 1,
+        targetWorkspace: 2,
+        rect: {x: 1920, y: 0, width: 854, height: 960},
+    };
+}
+
 test('ensure desktop action validates typed desktop identity', () => {
     const action = validateShellAction(ensureAction());
     assert.equal(action.kind, 'ensure_desktop_app');
@@ -35,6 +51,17 @@ test('close window action validates stable window identity', () => {
         windowId: stableWindowId(42),
     });
     assert.equal(action.windowId, 'window:42');
+});
+
+test('placement action requires topology, monitor identity and logical rect', () => {
+    const action = validateShellAction(placementAction());
+    assert.equal(action.kind, 'place_window');
+    assert.equal(action.monitorRef, 'monitor:1');
+    assert.equal(action.targetWorkspace, 2);
+    assert.deepEqual(action.rect, {x: 1920, y: 0, width: 854, height: 960});
+    assert.throws(() => validateShellAction({...placementAction(), topologyRevision: ''}), /topologyRevision/);
+    assert.throws(() => validateShellAction({...placementAction(), monitorIndex: -1}), /monitorIndex/);
+    assert.throws(() => validateShellAction({...placementAction(), rect: {x: 0, y: 0, width: 0, height: 10}}), /rect/);
 });
 
 test('invalid schemas, kinds and missing identities fail closed', () => {

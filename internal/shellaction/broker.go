@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Homiakus/HWS/internal/domain"
 )
 
 const SchemaVersion uint32 = 1
@@ -21,16 +23,22 @@ type Kind string
 const (
 	KindEnsureDesktopApp Kind = "ensure_desktop_app"
 	KindCloseWindow      Kind = "close_window"
+	KindPlaceWindow      Kind = "place_window"
 )
 
 type Request struct {
-	Schema       uint32 `json:"schema"`
-	ID           string `json:"id"`
-	Kind         Kind   `json:"kind"`
-	WorkspaceID  string `json:"workspaceId"`
-	ResourceID   string `json:"resourceId"`
-	DesktopAppID string `json:"desktopAppId,omitempty"`
-	WindowID     string `json:"windowId,omitempty"`
+	Schema           uint32             `json:"schema"`
+	ID               string             `json:"id"`
+	Kind             Kind               `json:"kind"`
+	WorkspaceID      string             `json:"workspaceId"`
+	ResourceID       string             `json:"resourceId"`
+	DesktopAppID     string             `json:"desktopAppId,omitempty"`
+	WindowID         string             `json:"windowId,omitempty"`
+	TopologyRevision string             `json:"topologyRevision,omitempty"`
+	MonitorRef       string             `json:"monitorRef,omitempty"`
+	MonitorIndex     int                `json:"monitorIndex,omitempty"`
+	TargetWorkspace  int                `json:"targetWorkspace,omitempty"`
+	Rect             domain.LogicalRect `json:"rect,omitempty"`
 }
 
 type Result struct {
@@ -185,6 +193,13 @@ func validateRequest(request Request) error {
 	case KindCloseWindow:
 		if strings.TrimSpace(request.WindowID) == "" {
 			return errors.New("shell action request: window id is required")
+		}
+	case KindPlaceWindow:
+		if strings.TrimSpace(request.WindowID) == "" || strings.TrimSpace(request.TopologyRevision) == "" || strings.TrimSpace(request.MonitorRef) == "" {
+			return errors.New("shell action request: placement requires window id, topology revision and monitor ref")
+		}
+		if request.MonitorIndex < 0 || request.TargetWorkspace < 0 || !request.Rect.Valid() {
+			return errors.New("shell action request: placement target is invalid")
 		}
 	default:
 		return fmt.Errorf("shell action request: unsupported kind %q", request.Kind)
