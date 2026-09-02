@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Homiakus/HWS/internal/domain"
+	"github.com/Homiakus/HWS/internal/providers/gnomeshell"
 	"github.com/Homiakus/HWS/internal/shellaction"
 	"github.com/Homiakus/HWS/internal/surface"
 )
@@ -14,12 +15,25 @@ import (
 type fakeReader struct {
 	mu       sync.Mutex
 	snapshot surface.Snapshot
+	shell    gnomeshell.Snapshot
 }
 
 func (r *fakeReader) SurfaceSnapshot() surface.Snapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.snapshot.Clone()
+}
+
+func (r *fakeReader) ShellSnapshot() gnomeshell.Snapshot {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := r.shell
+	out.Topology.Monitors = append([]gnomeshell.Monitor(nil), r.shell.Topology.Monitors...)
+	out.Apps = append([]gnomeshell.Application(nil), r.shell.Apps...)
+	for i := range out.Apps {
+		out.Apps[i].Windows = append([]gnomeshell.Window(nil), r.shell.Apps[i].Windows...)
+	}
+	return out
 }
 
 func (r *fakeReader) setApplication(app surface.ApplicationSurface) {
