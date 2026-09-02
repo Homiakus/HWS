@@ -405,6 +405,10 @@ func (r *Runtime) HealthJSON() (string, error) {
 	if lastErr := r.workspaces.LastError(); lastErr != nil {
 		payload["workspaceCatalogError"] = lastErr.Error()
 	}
+	shellSnapshot := r.ShellSnapshot()
+	payload["shellSnapshotRevision"] = shellSnapshot.Revision
+	payload["shellTopologyRevision"] = shellSnapshot.Topology.Revision
+	payload["shellMonitorCount"] = len(shellSnapshot.Topology.Monitors)
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
