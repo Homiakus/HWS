@@ -1,6 +1,10 @@
 package dbusapi
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/godbus/dbus/v5"
+)
 
 type workspaceFakeBackend struct {
 	fakeBackend
@@ -92,7 +96,7 @@ func TestWorkspaceServiceMethods(t *testing.T) {
 	}
 }
 
-func assertWorkspaceServiceResult(t *testing.T, value string, dbusErr error, want string) {
+func assertWorkspaceServiceResult(t *testing.T, value string, dbusErr *dbus.Error, want string) {
 	t.Helper()
 	if dbusErr != nil {
 		t.Fatal(dbusErr)
