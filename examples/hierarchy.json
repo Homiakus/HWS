@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "nodes": [
+    {"id":"root","kind":"category","title":"Home","order":0},
+    {"id":"dev","parentId":"root","kind":"category","title":"Development","order":10},
+    {"id":"dev-projects","parentId":"dev","kind":"category","title":"Projects","order":10},
+    {"id":"hws","parentId":"dev-projects","kind":"project","title":"HWS","order":10},
+    {"id":"hws-desktop-demo","parentId":"hws","kind":"task","title":"Desktop Demo","order":10,"workspaceId":"desktop-demo"},
+    {"id":"system","parentId":"root","kind":"category","title":"System","order":20},
+    {"id":"system-status","parentId":"system","kind":"task","title":"Status","order":10}
+  ]
+}

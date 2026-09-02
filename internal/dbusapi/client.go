@@ -87,19 +87,11 @@ func (c *Client) TreeJSON() (string, error) {
 }
 
 func (c *Client) PathJSON(nodeID string) (string, error) {
-	var value string
-	if err := c.object.Call(ipc.InterfaceName+".GetPath", 0, nodeID).Store(&value); err != nil {
-		return "", fmt.Errorf("GetPath: %w", err)
-	}
-	return value, nil
+	return c.stringArgCall("GetPath", nodeID)
 }
 
 func (c *Client) ApplicationJSON(appID string) (string, error) {
-	var value string
-	if err := c.object.Call(ipc.InterfaceName+".GetApplicationSurface", 0, appID).Store(&value); err != nil {
-		return "", fmt.Errorf("GetApplicationSurface: %w", err)
-	}
-	return value, nil
+	return c.stringArgCall("GetApplicationSurface", appID)
 }
 
 func (c *Client) ReloadPanel() (bool, string, error) {
@@ -109,6 +101,14 @@ func (c *Client) ReloadPanel() (bool, string, error) {
 		return false, "", fmt.Errorf("ReloadPanel: %w", err)
 	}
 	return ok, diagnostic, nil
+}
+
+func (c *Client) stringArgCall(method, arg string) (string, error) {
+	var value string
+	if err := c.object.Call(ipc.InterfaceName+"."+method, 0, arg).Store(&value); err != nil {
+		return "", fmt.Errorf("%s: %w", method, err)
+	}
+	return value, nil
 }
 
 func (c *Client) stringCall(method string) (string, error) {

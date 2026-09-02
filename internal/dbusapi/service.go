@@ -63,6 +63,10 @@ func (s *Service) Hello(clientProtocol uint32, clientInstance string) (uint32, s
 		"view.activate":         "supported",
 		"view.close":            "supported",
 		"workspace.activate":    "supported",
+		"workspace.recover":     "supported",
+		"workspace.resume":      "supported",
+		"workspace.suspend":     "supported",
+		"workspace.close":       "supported",
 		"workspace.state":       "supported",
 	})
 	return ipc.ProtocolVersion, s.serverInstance, s.revisionEpoch, string(capabilities), nil
@@ -219,6 +223,10 @@ func introspectionNode() *introspect.Node {
 					{Name: "ActivateView", Args: []introspect.Arg{{Name: "appId", Type: "s", Direction: "in"}, {Name: "viewId", Type: "s", Direction: "in"}}},
 					{Name: "CloseView", Args: []introspect.Arg{{Name: "appId", Type: "s", Direction: "in"}, {Name: "viewId", Type: "s", Direction: "in"}}},
 					{Name: "ActivateWorkspace", Args: []introspect.Arg{{Name: "workspaceId", Type: "s", Direction: "in"}, {Name: "operationKey", Type: "s", Direction: "in"}, {Name: "json", Type: "s", Direction: "out"}}},
+					{Name: "RecoverWorkspace", Args: []introspect.Arg{{Name: "workspaceId", Type: "s", Direction: "in"}, {Name: "operationKey", Type: "s", Direction: "in"}, {Name: "json", Type: "s", Direction: "out"}}},
+					{Name: "ResumeWorkspace", Args: []introspect.Arg{{Name: "workspaceId", Type: "s", Direction: "in"}, {Name: "operationKey", Type: "s", Direction: "in"}, {Name: "json", Type: "s", Direction: "out"}}},
+					{Name: "SuspendWorkspace", Args: []introspect.Arg{{Name: "workspaceId", Type: "s", Direction: "in"}, {Name: "json", Type: "s", Direction: "out"}}},
+					{Name: "CloseWorkspace", Args: []introspect.Arg{{Name: "workspaceId", Type: "s", Direction: "in"}, {Name: "operationKey", Type: "s", Direction: "in"}, {Name: "json", Type: "s", Direction: "out"}}},
 					{Name: "GetWorkspaceState", Args: []introspect.Arg{{Name: "workspaceId", Type: "s", Direction: "in"}, {Name: "json", Type: "s", Direction: "out"}}},
 				},
 				Signals: []introspect.Signal{
