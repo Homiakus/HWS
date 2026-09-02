@@ -12,6 +12,7 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {AppCapsule} from './appCapsule.js';
 import {DaemonClient} from './daemonClient.js';
 import {installHomeGrid} from './homeGrid.js';
+import {captureTopology, windowFrame} from './topologyAdapter.js';
 
 const MAX_INLINE_WINDOWS = 4;
 const SHELL_SNAPSHOT_SCHEMA = 1;
@@ -108,7 +109,11 @@ class ActivityStripIndicator extends PanelMenu.Button {
         connectOptional(global.display, 'window-marked-urgent', () => this.queueRefresh(), this._signals);
         connectOptional(global.display, 'window-entered-monitor', () => this.queueRefresh(), this._signals);
         connectOptional(global.display, 'window-left-monitor', () => this.queueRefresh(), this._signals);
+        connectOptional(global.display, 'workareas-changed', () => this.queueRefresh(), this._signals);
         connectOptional(global.workspace_manager, 'active-workspace-changed', () => this.queueRefresh(), this._signals);
+        connectOptional(global.workspace_manager, 'workspace-added', () => this.queueRefresh(), this._signals);
+        connectOptional(global.workspace_manager, 'workspace-removed', () => this.queueRefresh(), this._signals);
+        connectOptional(Main.layoutManager, 'monitors-changed', () => this.queueRefresh(true), this._signals);
         connectOptional(this._appSystem, 'app-state-changed', () => this.queueRefresh(), this._signals);
 
         this._daemon = new DaemonClient({
@@ -185,6 +190,7 @@ class ActivityStripIndicator extends PanelMenu.Button {
     _shellPayload(nativeCards) {
         return {
             schema: SHELL_SNAPSHOT_SCHEMA,
+            topology: captureTopology(),
             apps: nativeCards.map(card => ({
                 appId: card.id,
                 name: card.name,
@@ -196,6 +202,7 @@ class ActivityStripIndicator extends PanelMenu.Button {
                     title: window.get_title?.() || '',
                     workspaceId: workspaceID(window),
                     monitorRef: monitorRef(window),
+                    frame: windowFrame(window),
                     focused: window === global.display.focus_window,
                     minimized: Boolean(window.minimized),
                     mru: Number(window.get_user_time?.() || 0),
