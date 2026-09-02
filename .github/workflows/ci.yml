@@ -52,16 +52,19 @@ jobs:
           node --input-type=module --check < shell-extension/daemonClient.js
           node --input-type=module --check < shell-extension/homeGrid.js
           node --input-type=module --check < shell-extension/homeGridModel.js
+          node --input-type=module --check < shell-extension/workspaceStateModel.js
           node --input-type=module --check < shell-extension/shellActionModel.js
           node --input-type=module --check < shell-extension/shellExecutor.js
       - name: Shell model tests
-        run: node --test shell-extension/homeGridModel.test.mjs shell-extension/shellActionModel.test.mjs
+        run: node --test shell-extension/homeGridModel.test.mjs shell-extension/workspaceStateModel.test.mjs shell-extension/shellActionModel.test.mjs
       - name: JSON manifests
         shell: bash
         run: |
           python3 -m json.tool shell-extension/metadata.json >/dev/null
           python3 -m json.tool providers/browser/webextension/manifest.json >/dev/null
           python3 -m json.tool providers/vscode/package.json >/dev/null
+          python3 -m json.tool examples/hierarchy.json >/dev/null
+          python3 -m json.tool examples/workspaces.json >/dev/null
       - name: Build daemon
         run: go build ./cmd/hwsd
       - name: Demo smoke test
