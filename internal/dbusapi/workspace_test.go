@@ -10,6 +10,7 @@ type workspaceFakeBackend struct {
 	fakeBackend
 	calls      []string
 	state      string
+	states     string
 	completion string
 }
 
@@ -38,6 +39,11 @@ func (f *workspaceFakeBackend) WorkspaceStateJSON(workspaceID string) (string, e
 	return f.state, f.err
 }
 
+func (f *workspaceFakeBackend) WorkspaceStatesJSON() (string, error) {
+	f.calls = append(f.calls, "states")
+	return f.states, f.err
+}
+
 func (f *workspaceFakeBackend) CompleteShellActionJSON(payload string) error {
 	f.completion = payload
 	return f.err
@@ -53,7 +59,10 @@ func (f *workspaceFakeBackend) record(action, workspaceID, operationKey string) 
 }
 
 func TestWorkspaceServiceMethods(t *testing.T) {
-	backend := &workspaceFakeBackend{state: `{"status":"inactive"}`}
+	backend := &workspaceFakeBackend{
+		state:  `{"status":"inactive"}`,
+		states: `{"schema":1,"revision":2,"states":[]}`,
+	}
 	service := NewService(backend)
 
 	value, dbusErr := service.ActivateWorkspace("dev", "op-1")
@@ -71,6 +80,10 @@ func TestWorkspaceServiceMethods(t *testing.T) {
 	if dbusErr != nil || state != backend.state {
 		t.Fatalf("state=%q err=%v", state, dbusErr)
 	}
+	states, dbusErr := service.GetWorkspaceStates()
+	if dbusErr != nil || states != backend.states {
+		t.Fatalf("states=%q err=%v", states, dbusErr)
+	}
 	if dbusErr := service.CompleteShellAction(`{"schema":1,"id":"x","success":true}`); dbusErr != nil {
 		t.Fatal(dbusErr)
 	}
@@ -85,6 +98,7 @@ func TestWorkspaceServiceMethods(t *testing.T) {
 		"suspend:dev",
 		"close:dev:op-4",
 		"state:dev",
+		"states",
 	}
 	if len(backend.calls) != len(want) {
 		t.Fatalf("calls=%#v want=%#v", backend.calls, want)
