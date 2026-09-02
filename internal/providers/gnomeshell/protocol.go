@@ -21,7 +21,7 @@ type Snapshot struct {
 	Schema     uint32        `json:"schema"`
 	Revision   uint64        `json:"revision"`
 	CapturedAt time.Time     `json:"capturedAt"`
-	Topology   Topology      `json:"topology"`
+	Topology   Topology      `json:"topology,omitempty"`
 	Apps       []Application `json:"apps"`
 }
 
@@ -55,7 +55,7 @@ type Window struct {
 	Title       string             `json:"title"`
 	WorkspaceID string             `json:"workspaceId,omitempty"`
 	MonitorRef  string             `json:"monitorRef,omitempty"`
-	Frame       domain.LogicalRect `json:"frame"`
+	Frame       domain.LogicalRect `json:"frame,omitempty"`
 	Focused     bool               `json:"focused,omitempty"`
 	Minimized   bool               `json:"minimized,omitempty"`
 	MRU         uint64             `json:"mru,omitempty"`
@@ -83,8 +83,10 @@ func (s Snapshot) Validate() error {
 	if s.CapturedAt.IsZero() {
 		return errors.New("GNOME Shell capturedAt is required")
 	}
-	if err := s.Topology.Validate(); err != nil {
-		return err
+	if s.Topology.Revision != "" {
+		if err := s.Topology.Validate(); err != nil {
+			return err
+		}
 	}
 
 	apps := map[string]struct{}{}
@@ -106,7 +108,7 @@ func (s Snapshot) Validate() error {
 				return fmt.Errorf("duplicate GNOME Shell window %q", window.ID)
 			}
 			windows[window.ID] = struct{}{}
-			if !window.Frame.Valid() {
+			if window.Frame != (domain.LogicalRect{}) && !window.Frame.Valid() {
 				return fmt.Errorf("GNOME Shell window %q has invalid frame", window.ID)
 			}
 			switch window.Attention {
