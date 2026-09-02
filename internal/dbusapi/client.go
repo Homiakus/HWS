@@ -94,30 +94,6 @@ func (c *Client) ApplicationJSON(appID string) (string, error) {
 	return c.stringArgCall("GetApplicationSurface", appID)
 }
 
-func (c *Client) WorkspaceStateJSON(workspaceID string) (string, error) {
-	return c.stringArgCall("GetWorkspaceState", workspaceID)
-}
-
-func (c *Client) ActivateWorkspaceJSON(workspaceID, operationKey string) (string, error) {
-	return c.workspaceMutationCall("ActivateWorkspace", workspaceID, operationKey)
-}
-
-func (c *Client) RecoverWorkspaceJSON(workspaceID, operationKey string) (string, error) {
-	return c.workspaceMutationCall("RecoverWorkspace", workspaceID, operationKey)
-}
-
-func (c *Client) ResumeWorkspaceJSON(workspaceID, operationKey string) (string, error) {
-	return c.workspaceMutationCall("ResumeWorkspace", workspaceID, operationKey)
-}
-
-func (c *Client) SuspendWorkspaceJSON(workspaceID string) (string, error) {
-	return c.stringArgCall("SuspendWorkspace", workspaceID)
-}
-
-func (c *Client) CloseWorkspaceJSON(workspaceID, operationKey string) (string, error) {
-	return c.workspaceMutationCall("CloseWorkspace", workspaceID, operationKey)
-}
-
 func (c *Client) ReloadPanel() (bool, string, error) {
 	var ok bool
 	var diagnostic string
@@ -125,14 +101,6 @@ func (c *Client) ReloadPanel() (bool, string, error) {
 		return false, "", fmt.Errorf("ReloadPanel: %w", err)
 	}
 	return ok, diagnostic, nil
-}
-
-func (c *Client) workspaceMutationCall(method, workspaceID, operationKey string) (string, error) {
-	var value string
-	if err := c.object.Call(ipc.InterfaceName+"."+method, 0, workspaceID, operationKey).Store(&value); err != nil {
-		return "", fmt.Errorf("%s: %w", method, err)
-	}
-	return value, nil
 }
 
 func (c *Client) stringArgCall(method, arg string) (string, error) {
