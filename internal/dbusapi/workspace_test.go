@@ -52,11 +52,16 @@ func TestWorkspaceServiceMethods(t *testing.T) {
 	backend := &workspaceFakeBackend{state: `{"status":"inactive"}`}
 	service := NewService(backend)
 
-	assertServiceWorkspaceCall(t, service.ActivateWorkspace("dev", "op-1"), `{"status":"activate"}`)
-	assertServiceWorkspaceCall(t, service.RecoverWorkspace("dev", "op-2"), `{"status":"recover"}`)
-	assertServiceWorkspaceCall(t, service.ResumeWorkspace("dev", "op-3"), `{"status":"resume"}`)
-	assertServiceWorkspaceCall(t, service.SuspendWorkspace("dev"), `{"status":"suspend"}`)
-	assertServiceWorkspaceCall(t, service.CloseWorkspace("dev", "op-4"), `{"status":"close"}`)
+	value, dbusErr := service.ActivateWorkspace("dev", "op-1")
+	assertWorkspaceServiceResult(t, value, dbusErr, `{"status":"activate"}`)
+	value, dbusErr = service.RecoverWorkspace("dev", "op-2")
+	assertWorkspaceServiceResult(t, value, dbusErr, `{"status":"recover"}`)
+	value, dbusErr = service.ResumeWorkspace("dev", "op-3")
+	assertWorkspaceServiceResult(t, value, dbusErr, `{"status":"resume"}`)
+	value, dbusErr = service.SuspendWorkspace("dev")
+	assertWorkspaceServiceResult(t, value, dbusErr, `{"status":"suspend"}`)
+	value, dbusErr = service.CloseWorkspace("dev", "op-4")
+	assertWorkspaceServiceResult(t, value, dbusErr, `{"status":"close"}`)
 
 	state, dbusErr := service.GetWorkspaceState("dev")
 	if dbusErr != nil || state != backend.state {
@@ -87,7 +92,7 @@ func TestWorkspaceServiceMethods(t *testing.T) {
 	}
 }
 
-func assertServiceWorkspaceCall(t *testing.T, value string, dbusErr interface{ Error() string }, want string) {
+func assertWorkspaceServiceResult(t *testing.T, value string, dbusErr error, want string) {
 	t.Helper()
 	if dbusErr != nil {
 		t.Fatal(dbusErr)
