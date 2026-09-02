@@ -7,9 +7,15 @@ const INTERFACE_NAME = 'org.homiakus.HWS1';
 const PROTOCOL_VERSION = 1;
 
 export class DaemonClient {
-    constructor({onCardsChanged = null, onTreeChanged = null, onAvailabilityChanged = null} = {}) {
+    constructor({
+        onCardsChanged = null,
+        onTreeChanged = null,
+        onShellAction = null,
+        onAvailabilityChanged = null,
+    } = {}) {
         this._onCardsChanged = onCardsChanged;
         this._onTreeChanged = onTreeChanged;
+        this._onShellAction = onShellAction;
         this._onAvailabilityChanged = onAvailabilityChanged;
         this._proxy = null;
         this._signals = [];
@@ -59,11 +65,14 @@ export class DaemonClient {
                     return;
                 }
                 this._signals.push(this._proxy.connect('notify::g-name-owner', () => this._ownerChanged()));
-                this._signals.push(this._proxy.connect('g-signal', (_proxy, _sender, signalName) => {
-                    if (signalName === 'PanelChanged' || signalName === 'PanelConfigChanged')
+                this._signals.push(this._proxy.connect('g-signal', (_proxy, _sender, signalName, parameters) => {
+                    if (signalName === 'PanelChanged' || signalName === 'PanelConfigChanged') {
                         this.queueRefresh();
-                    else if (signalName === 'TreeChanged')
+                    } else if (signalName === 'TreeChanged') {
                         this.queueTreeRefresh();
+                    } else if (signalName === 'ShellActionRequested') {
+                        this._dispatchShellAction(parameters);
+                    }
                 }));
                 this._ownerChanged();
             }
@@ -93,6 +102,22 @@ export class DaemonClient {
         }, () => this._setAvailable(false));
     }
 
+    _dispatchShellAction(parameters) {
+        if (!this._onShellAction)
+            return;
+        try {
+            const values = parameters?.deep_unpack?.();
+            const payload = Array.isArray(values) ? values[0] : null;
+            if (typeof payload !== 'string')
+                return;
+            const action = JSON.parse(payload);
+            if (action && typeof action === 'object')
+                this._onShellAction(action);
+        } catch (error) {
+            console.error(`HWS could not decode ShellActionRequested: ${error.message}`);
+        }
+    }
+
     _setAvailable(value) {
         if (this._available === value)
             return;
@@ -100,16 +125,16 @@ export class DaemonClient {
         this._onAvailabilityChanged?.(value);
     }
 
-    _call(method, parameters, done = null, failed = null) {
+    _call(method, parameters, done = null, failed = null, timeoutMS = 1500) {
         if (!this._proxy || !this._proxy.get_name_owner?.()) {
-            failed?.();
+            failed?.(new Error('hwsd is unavailable'));
             return;
         }
         this._proxy.call(
             method,
             parameters,
             Gio.DBusCallFlags.NONE,
-            1500,
+            timeoutMS,
             this._cancellable,
             (proxy, result) => {
                 if (this._cancellable.is_cancelled())
@@ -197,6 +222,52 @@ export class DaemonClient {
         );
     }
 
+    completeShellAction(result, done = null, failed = null) {
+        if (!result || typeof result !== 'object') {
+            failed?.(new Error('shell action result is required'));
+            return;
+        }
+        this._call(
+            'CompleteShellAction',
+            new GLib.Variant('(s)', [JSON.stringify(result)]),
+            done,
+            failed
+        );
+    }
+
+    activateWorkspace(workspaceID, done = null, failed = null) {
+        if (typeof workspaceID !== 'string' || !workspaceID.trim()) {
+            failed?.(new Error('workspace id is required'));
+            return;
+        }
+        const operationKey = `shell:${this._instance}:${GLib.uuid_string_random()}`;
+        this._call(
+            'ActivateWorkspace',
+            new GLib.Variant('(ss)', [workspaceID.trim(), operationKey]),
+            values => {
+                try {
+                    const state = JSON.parse(values[0]);
+                    done?.(state && typeof state === 'object' ? state : null);
+                } catch (error) {
+                    failed?.(error);
+                }
+            },
+            failed,
+            22000
+        );
+    }
+
+    getWorkspaceState(workspaceID, done = null, failed = null) {
+        this._call('GetWorkspaceState', new GLib.Variant('(s)', [workspaceID]), values => {
+            try {
+                const state = JSON.parse(values[0]);
+                done?.(state && typeof state === 'object' ? state : null);
+            } catch (error) {
+                failed?.(error);
+            }
+        }, failed);
+    }
+
     getHealth(done) {
         this._call('GetHealth', null, values => {
             try {
@@ -244,5 +315,6 @@ export class DaemonClient {
         this._cards = [];
         this._render = null;
         this._tree = null;
+        this._onShellAction = null;
     }
 }
