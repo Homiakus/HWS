@@ -55,8 +55,10 @@ jobs:
           node --input-type=module --check < shell-extension/workspaceStateModel.js
           node --input-type=module --check < shell-extension/shellActionModel.js
           node --input-type=module --check < shell-extension/shellExecutor.js
+          node --input-type=module --check < shell-extension/topologyModel.js
+          node --input-type=module --check < shell-extension/topologyAdapter.js
       - name: Shell model tests
-        run: node --test shell-extension/homeGridModel.test.mjs shell-extension/workspaceStateModel.test.mjs shell-extension/shellActionModel.test.mjs
+        run: node --test shell-extension/homeGridModel.test.mjs shell-extension/workspaceStateModel.test.mjs shell-extension/shellActionModel.test.mjs shell-extension/topologyModel.test.mjs
       - name: JSON manifests
         shell: bash
         run: |
