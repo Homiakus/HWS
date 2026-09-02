@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Homiakus/HWS/internal/domain"
 	"github.com/Homiakus/HWS/internal/shellaction"
@@ -27,20 +28,40 @@ func (r *fakeReader) setApplication(app surface.ApplicationSurface) {
 	r.snapshot.Surfaces = []surface.ApplicationSurface{app}
 }
 
+func (r *fakeReader) removeWindow(windowID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for ai := range r.snapshot.Surfaces {
+		windows := r.snapshot.Surfaces[ai].Windows[:0]
+		for _, window := range r.snapshot.Surfaces[ai].Windows {
+			if string(window.ID) != windowID {
+				windows = append(windows, window)
+			}
+		}
+		r.snapshot.Surfaces[ai].Windows = windows
+	}
+}
+
 type fakeActions struct {
-	reader   *fakeReader
-	requests []shellaction.Request
-	changed  bool
+	reader    *fakeReader
+	requests  []shellaction.Request
+	changed   bool
+	holdClose bool
 }
 
 func (a *fakeActions) Request(_ context.Context, request shellaction.Request) (shellaction.Result, error) {
 	a.requests = append(a.requests, request)
-	if request.Kind == shellaction.KindEnsureDesktopApp {
+	switch request.Kind {
+	case shellaction.KindEnsureDesktopApp:
 		a.reader.setApplication(surface.ApplicationSurface{
 			AppID:        surface.ApplicationID(request.DesktopAppID),
 			DesktopAppID: request.DesktopAppID,
 			Windows:      []surface.Window{{ID: "window:7"}},
 		})
+	case shellaction.KindCloseWindow:
+		if !a.holdClose {
+			a.reader.removeWindow(request.WindowID)
+		}
 	}
 	return shellaction.Result{Schema: shellaction.SchemaVersion, ID: request.ID, Success: true, Changed: a.changed}, nil
 }
@@ -98,10 +119,11 @@ func TestPreexistingManagedResourceIsObservedAsAdopted(t *testing.T) {
 	}
 }
 
-func TestManagedCloseUsesObservedWindowIdentity(t *testing.T) {
+func TestManagedCloseUsesObservedWindowIdentityAndWaitsForAbsence(t *testing.T) {
 	reader := &fakeReader{}
 	actions := &fakeActions{reader: reader, changed: true}
 	desktop := New(reader, actions)
+	desktop.poll = time.Millisecond
 	desired := managedDesired()
 	observation, err := desktop.Ensure(context.Background(), desired, desired.Resources[0])
 	if err != nil {
@@ -112,5 +134,26 @@ func TestManagedCloseUsesObservedWindowIdentity(t *testing.T) {
 	}
 	if len(actions.requests) != 2 || actions.requests[1].Kind != shellaction.KindCloseWindow || actions.requests[1].WindowID != "window:7" {
 		t.Fatalf("unexpected requests: %#v", actions.requests)
+	}
+}
+
+func TestManagedCloseFailsIfClientRefusesToDisappear(t *testing.T) {
+	reader := &fakeReader{}
+	actions := &fakeActions{reader: reader, changed: true}
+	desktop := New(reader, actions)
+	desktop.poll = time.Millisecond
+	desired := managedDesired()
+	observation, err := desktop.Ensure(context.Background(), desired, desired.Resources[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions.holdClose = true
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := desktop.Close(ctx, desired, desired.Resources[0], observation); err == nil {
+		t.Fatal("close converged even though the tracked window remained present")
+	}
+	if !desktop.isManaged(desired.WorkspaceID, desired.Resources[0].ID) {
+		t.Fatal("managed evidence was dropped after a non-converged close")
 	}
 }
