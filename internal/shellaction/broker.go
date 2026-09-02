@@ -27,17 +27,18 @@ const (
 )
 
 type Request struct {
-	Schema            uint32             `json:"schema"`
-	ID                string             `json:"id"`
-	Kind              Kind               `json:"kind"`
-	WorkspaceID       string             `json:"workspaceId"`
-	ResourceID        string             `json:"resourceId"`
-	DesktopAppID      string             `json:"desktopAppId,omitempty"`
-	WindowID          string             `json:"windowId,omitempty"`
-	TopologyRevision  string             `json:"topologyRevision,omitempty"`
-	MonitorIndex      int                `json:"monitorIndex,omitempty"`
-	TargetWorkspace   int                `json:"targetWorkspace,omitempty"`
-	Rect              domain.LogicalRect `json:"rect,omitempty"`
+	Schema           uint32             `json:"schema"`
+	ID               string             `json:"id"`
+	Kind             Kind               `json:"kind"`
+	WorkspaceID      string             `json:"workspaceId"`
+	ResourceID       string             `json:"resourceId"`
+	DesktopAppID     string             `json:"desktopAppId,omitempty"`
+	WindowID         string             `json:"windowId,omitempty"`
+	TopologyRevision string             `json:"topologyRevision,omitempty"`
+	MonitorRef       string             `json:"monitorRef,omitempty"`
+	MonitorIndex     int                `json:"monitorIndex,omitempty"`
+	TargetWorkspace  int                `json:"targetWorkspace,omitempty"`
+	Rect             domain.LogicalRect `json:"rect,omitempty"`
 }
 
 type Result struct {
@@ -194,8 +195,8 @@ func validateRequest(request Request) error {
 			return errors.New("shell action request: window id is required")
 		}
 	case KindPlaceWindow:
-		if strings.TrimSpace(request.WindowID) == "" || strings.TrimSpace(request.TopologyRevision) == "" {
-			return errors.New("shell action request: placement requires window id and topology revision")
+		if strings.TrimSpace(request.WindowID) == "" || strings.TrimSpace(request.TopologyRevision) == "" || strings.TrimSpace(request.MonitorRef) == "" {
+			return errors.New("shell action request: placement requires window id, topology revision and monitor ref")
 		}
 		if request.MonitorIndex < 0 || request.TargetWorkspace < 0 || !request.Rect.Valid() {
 			return errors.New("shell action request: placement target is invalid")
