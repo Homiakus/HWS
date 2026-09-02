@@ -18,6 +18,7 @@ import (
 	"github.com/Homiakus/HWS/internal/contexttree"
 	"github.com/Homiakus/HWS/internal/domain"
 	workspaceflow "github.com/Homiakus/HWS/internal/orchestration/workspace"
+	"github.com/Homiakus/HWS/internal/providers/gnomeshell"
 	"github.com/Homiakus/HWS/internal/shellaction"
 )
 
@@ -41,6 +42,9 @@ type Runtime struct {
 	workspaceStateMu       sync.RWMutex
 	workspaceStateRevision uint64
 	onWorkspaceChanged     func(string, uint64)
+
+	shellSnapshotMu sync.RWMutex
+	shellSnapshot   gnomeshell.Snapshot
 }
 
 func NewRuntime(hub *Hub) *Runtime {
@@ -74,7 +78,7 @@ func (r *Runtime) OpenWorkspaceLifecycle(storePath string) error {
 	if err := os.MkdirAll(filepath.Dir(storePath), 0o700); err != nil {
 		return err
 	}
-	desktop := shelldesktop.New(r.Hub, r.shellActions)
+	desktop := shelldesktop.New(r, r.shellActions)
 	lifecycle, err := workspaceflow.OpenProduction(storePath, r.workspaces, reconcile.New(desktop))
 	if err != nil {
 		return err
@@ -109,6 +113,42 @@ func (r *Runtime) SetShellActionEmitter(emit func(string)) {
 
 func (r *Runtime) CompleteShellActionJSON(payload string) error {
 	return r.shellActions.CompleteJSON(payload)
+}
+
+// ReplaceShellSnapshotJSON validates and retains the authoritative native
+// topology/window geometry before publishing the same snapshot into the
+// canonical surface aggregation path. Failed snapshots never replace the
+// last-known-good placement observation.
+func (r *Runtime) ReplaceShellSnapshotJSON(payload string) error {
+	snapshot, err := gnomeshell.Decode([]byte(payload))
+	if err != nil {
+		return err
+	}
+	if err := r.Hub.ReplaceShellSnapshotJSON(payload); err != nil {
+		return err
+	}
+	r.shellSnapshotMu.Lock()
+	r.shellSnapshot = cloneShellSnapshot(snapshot)
+	r.shellSnapshotMu.Unlock()
+	return nil
+}
+
+func (r *Runtime) ShellSnapshot() gnomeshell.Snapshot {
+	r.shellSnapshotMu.RLock()
+	defer r.shellSnapshotMu.RUnlock()
+	return cloneShellSnapshot(r.shellSnapshot)
+}
+
+func cloneShellSnapshot(in gnomeshell.Snapshot) gnomeshell.Snapshot {
+	out := in
+	out.Topology.Monitors = append([]gnomeshell.Monitor(nil), in.Topology.Monitors...)
+	out.Apps = make([]gnomeshell.Application, len(in.Apps))
+	for i := range in.Apps {
+		out.Apps[i] = in.Apps[i]
+		out.Apps[i].IdentityHints = append([]string(nil), in.Apps[i].IdentityHints...)
+		out.Apps[i].Windows = append([]gnomeshell.Window(nil), in.Apps[i].Windows...)
+	}
+	return out
 }
 
 func (r *Runtime) ActivateWorkspaceJSON(workspaceID, operationKey string) (string, error) {
