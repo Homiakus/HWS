@@ -1,6 +1,5 @@
 import Shell from 'gi://Shell';
 
-import {DaemonClient} from './daemonClient.js';
 import {
     makeShellActionResult,
     ShellActionKind,
@@ -9,14 +8,12 @@ import {
 } from './shellActionModel.js';
 
 export class ShellExecutor {
-    constructor() {
+    constructor(complete) {
         this._appSystem = Shell.AppSystem.get_default();
-        this._client = new DaemonClient({
-            onShellAction: action => this._handle(action),
-        });
+        this._completeResult = complete;
     }
 
-    _handle(raw) {
+    handle(raw) {
         let action;
         try {
             action = validateShellAction(raw);
@@ -92,7 +89,7 @@ export class ShellExecutor {
 
     _complete(action, success, changed = false, code = '', message = '') {
         try {
-            this._client.completeShellAction(makeShellActionResult(action, {
+            this._completeResult?.(makeShellActionResult(action, {
                 success,
                 changed,
                 code,
@@ -104,8 +101,7 @@ export class ShellExecutor {
     }
 
     destroy() {
-        this._client?.destroy();
-        this._client = null;
+        this._completeResult = null;
         this._appSystem = null;
     }
 }
