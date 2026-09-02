@@ -1,29 +1,10 @@
 package workspace
 
-import (
-	"context"
-
-	"github.com/Homiakus/HWS/internal/domain"
-)
-
-// StateOrInactive reads durable state without forcing creation of an Axiom
-// execution. The pinned pre-v1 Axiom runtime currently exposes its
-// ErrExecutionNotFound sentinel only from an internal package, so external
-// consumers cannot use errors.Is against it. Keep the compatibility check
-// isolated here at the Axiom boundary; do not copy it into daemon/UI code.
-//
-// When Axiom exposes a public classifier this exact-message shim must be
-// replaced and the pinned compatibility test updated.
-func (l *Lifecycle) StateOrInactive(ctx context.Context, workspaceID domain.WorkspaceID) (State, bool, error) {
-	state, err := l.State(ctx, workspaceID)
-	if err == nil {
-		return state, true, nil
-	}
-	if err.Error() != "execution not found" {
-		return State{}, false, err
-	}
-	return State{
-		Status:      StatusInactive,
-		WorkspaceID: string(workspaceID),
-	}, false, nil
+// isExecutionNotFound is intentionally isolated at the Axiom boundary.
+// The pinned pre-v1 Axiom runtime currently exposes ErrExecutionNotFound only
+// from an internal package, which Go correctly prevents HWS from importing.
+// Keep this exact-message compatibility shim local and replace it with a
+// public Axiom classifier as soon as that API exists.
+func isExecutionNotFound(err error) bool {
+	return err != nil && err.Error() == "execution not found"
 }
