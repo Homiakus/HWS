@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "active": {
+    "desktop-demo": "v1"
+  },
+  "workspaces": [
+    {
+      "id": "desktop-demo",
+      "revision": "v1",
+      "resources": [
+        {
+          "id": "files",
+          "kind": "desktop_app",
+          "required": true,
+          "ownership": "managed",
+          "desktopAppId": "org.gnome.Nautilus.desktop"
+        }
+      ]
+    }
+  ]
+}
