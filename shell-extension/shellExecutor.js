@@ -6,6 +6,7 @@ import {
     stableWindowId,
     validateShellAction,
 } from './shellActionModel.js';
+import {captureTopology, windowFrame} from './topologyAdapter.js';
 
 export class ShellExecutor {
     constructor(complete) {
@@ -32,6 +33,9 @@ export class ShellExecutor {
                 break;
             case ShellActionKind.CLOSE_WINDOW:
                 this._closeWindow(action);
+                break;
+            case ShellActionKind.PLACE_WINDOW:
+                this._placeWindow(action);
                 break;
             default:
                 this._complete(action, false, false, 'unsupported_action', `Unsupported action ${action.kind}`);
@@ -70,6 +74,67 @@ export class ShellExecutor {
         // This only means Mutter accepted the close request. hwsd still waits
         // for the window to disappear from observed state before convergence.
         this._complete(action, true, true);
+    }
+
+    _placeWindow(action) {
+        const beforeTopology = captureTopology();
+        if (beforeTopology.revision !== action.topologyRevision) {
+            this._complete(action, false, false, 'topology_changed', 'Monitor topology changed before placement');
+            return;
+        }
+        const monitor = beforeTopology.monitors.find(candidate => candidate.index === action.monitorIndex);
+        if (!monitor || monitor.ref !== action.monitorRef) {
+            this._complete(action, false, false, 'monitor_unavailable', `Monitor ${action.monitorRef} is unavailable`);
+            return;
+        }
+
+        const window = this._findWindow(action.windowId);
+        if (!window) {
+            this._complete(action, false, false, 'window_gone', `Window ${action.windowId} no longer exists`);
+            return;
+        }
+        if (window.is_fullscreen?.() || window.is_maximized?.()) {
+            this._complete(action, false, false, 'window_state_blocks_placement', `Window ${action.windowId} is fullscreen or maximized`);
+            return;
+        }
+        if (window.allows_move?.() === false || window.allows_resize?.() === false) {
+            this._complete(action, false, false, 'window_not_placeable', `Window ${action.windowId} does not allow move/resize`);
+            return;
+        }
+        const manager = global.workspace_manager;
+        if (action.targetWorkspace >= Number(manager.get_n_workspaces?.() ?? 0)) {
+            this._complete(action, false, false, 'workspace_unavailable', `Workspace ${action.targetWorkspace} is unavailable`);
+            return;
+        }
+
+        const beforeFrame = windowFrame(window);
+        const beforeMonitor = Number(window.get_monitor?.() ?? -1);
+        const beforeWorkspace = Number(window.get_workspace?.()?.index?.() ?? -1);
+        const changed = beforeMonitor !== action.monitorIndex ||
+            beforeWorkspace !== action.targetWorkspace ||
+            beforeFrame.x !== action.rect.x || beforeFrame.y !== action.rect.y ||
+            beforeFrame.width !== action.rect.width || beforeFrame.height !== action.rect.height;
+
+        if (beforeWorkspace !== action.targetWorkspace)
+            window.change_workspace_by_index(action.targetWorkspace, false);
+        if (beforeMonitor !== action.monitorIndex)
+            window.move_to_monitor(action.monitorIndex);
+        window.move_resize_frame(
+            true,
+            Math.trunc(action.rect.x),
+            Math.trunc(action.rect.y),
+            Math.trunc(action.rect.width),
+            Math.trunc(action.rect.height)
+        );
+
+        const afterTopology = captureTopology();
+        if (afterTopology.revision !== action.topologyRevision) {
+            this._complete(action, false, changed, 'topology_changed', 'Monitor topology changed during placement');
+            return;
+        }
+        // Acceptance is not convergence. hwsd verifies the next authoritative
+        // frame/workspace/monitor observation before marking the resource ready.
+        this._complete(action, true, changed);
     }
 
     _findWindow(windowId) {
